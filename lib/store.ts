@@ -1,5 +1,16 @@
 "use client";
 
+/**
+ * @file store.ts
+ * @description Zentraler Zustand-Store der GlobeNews-Applikation basierend auf Zustand.
+ *              Verwaltet den gesamten Applikationszustand: View, Theme, Filter, Benutzer,
+ *              Nachrichten, Timeline und Paywall. Der Benutzerzustand und das Theme werden
+ *              via localStorage persistiert.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type {
@@ -14,55 +25,139 @@ import type {
 import { demoNews } from "./demo-data";
 import { PLAN_FEATURES } from "./types";
 
+/**
+ * Vollständige Typdefinition des Applikations-Stores.
+ * Enthält alle State-Felder und die zugehörigen Aktionen.
+ */
 interface AppState {
-  // View
+  // --- View ---
+  /** Aktuelle Anzeigeansicht: Globus oder Feed-Liste */
   view: "globe" | "feed";
+  /**
+   * Setzt die aktive Anzeigeansicht.
+   * @param view - "globe" für 3D-Globus, "feed" für Listenansicht
+   */
   setView: (view: "globe" | "feed") => void;
 
-  // Theme
+  // --- Theme ---
+  /** Aktives Farbschema der Applikation */
   theme: "dark" | "light";
+  /** Wechselt zwischen Dark- und Light-Mode */
   toggleTheme: () => void;
 
-  // Filters
+  // --- Filter ---
+  /** Aktueller Filterzustand (Kategorien, Zeit, Region, Wichtigkeit) */
   filters: FilterState;
+  /**
+   * Setzt die ausgewählten Kategorien. Prüft Plan-Limits und löst ggf. Paywall aus.
+   * @param categories - Array der gewünschten Kategorien
+   */
   setCategories: (categories: Category[]) => void;
+  /**
+   * Setzt den aktiven Zeitfilter. Prüft Archiv-Berechtigung des Plans.
+   * @param filter - Gewünschter Zeitfilter
+   */
   setTimeFilter: (filter: TimeFilter) => void;
+  /**
+   * Setzt den aktiven Kontinent/Region-Filter.
+   * @param region - Regionscode ("all" für alle Regionen)
+   */
   setRegion: (region: string) => void;
+  /**
+   * Setzt den aktiven Länderfilter.
+   * @param country - Ländername
+   */
   setCountry: (country: string) => void;
+  /**
+   * Setzt die Wichtigkeitsstufen-Filter.
+   * @param importance - Array der gewünschten Wichtigkeitsstufen
+   */
   setImportance: (importance: Importance[]) => void;
+  /** Schaltet den Heatmap-Modus auf dem Globus um */
   toggleHeatmap: () => void;
+  /** Schaltet den Filter "Nur gespeicherte Artikel" um (Premium-Funktion) */
   toggleSavedOnly: () => void;
 
-  // User
+  // --- User ---
+  /** Aktueller Benutzerzustand (Login, Plan, gespeicherte Artikel) */
   user: UserState;
+  /** Simuliert einen Benutzer-Login (setzt isLoggedIn = true) */
   login: () => void;
+  /** Loggt den Benutzer aus und setzt Plan auf Free zurück */
   logout: () => void;
+  /**
+   * Setzt den aktiven Abonnement-Plan des Benutzers.
+   * @param plan - Gewünschter Plan (free/premium/business)
+   */
   setPlan: (plan: PlanTier) => void;
+  /**
+   * Fügt einen Artikel zur Merkliste hinzu oder entfernt ihn daraus.
+   * @param id - ID des Artikels
+   */
   toggleSavedItem: (id: string) => void;
 
-  // News
+  // --- News ---
+  /** Liste aller geladenen Nachrichtenartikel */
   news: NewsItem[];
+  /** Gibt an ob Nachrichten gerade geladen werden */
   newsLoading: boolean;
+  /** Fehlermeldung beim Laden der Nachrichten (null = kein Fehler) */
   newsError: string | null;
+  /**
+   * Lädt Nachrichten von der internen API (/api/news).
+   * Fällt bei Fehler auf Demo-Daten zurück.
+   */
   fetchNews: () => Promise<void>;
+  /**
+   * Gibt die gefilterte Nachrichtenliste basierend auf dem aktuellen Filterzustand zurück.
+   * Berücksichtigt: Kategorien, Wichtigkeit, Zeitfilter, gespeicherte Artikel.
+   * @returns Gefiltertes Array von NewsItems
+   */
   filteredNews: () => NewsItem[];
+  /** Aktuell im Popup angezeigter Artikel (null = kein Popup) */
   selectedNews: NewsItem | null;
+  /**
+   * Setzt den aktuell ausgewählten Artikel für das Detail-Popup.
+   * @param news - Artikel oder null zum Schliessen des Popups
+   */
   setSelectedNews: (news: NewsItem | null) => void;
 
-  // Timeline
+  // --- Timeline ---
+  /** Position des Timeline-Reglers (0-100, 100 = jetzt) */
   timelinePosition: number;
+  /**
+   * Setzt die Position des Timeline-Reglers.
+   * @param position - Wert zwischen 0 und 100
+   */
   setTimelinePosition: (position: number) => void;
 
-  // Paywall
+  // --- Paywall ---
+  /** Gibt an ob das Paywall-Modal sichtbar ist */
   showPaywall: boolean;
+  /** Name der Feature, die die Paywall ausgelöst hat */
   paywallFeature: string;
+  /**
+   * Öffnet das Paywall-Modal für eine bestimmte Premium-Funktion.
+   * @param feature - Name der gesperrten Funktion (z.B. "categories", "archive")
+   */
   triggerPaywall: (feature: string) => void;
+  /** Schliesst das Paywall-Modal */
   closePaywall: () => void;
 
-  // Helpers
+  // --- Helpers ---
+  /**
+   * Prüft ob der aktuelle Benutzerplan eine bestimmte Funktion unterstützt.
+   * @param feature - Name der zu prüfenden Funktion
+   * @returns true wenn die Funktion im aktuellen Plan verfügbar ist
+   */
   canUseFeature: (feature: string) => boolean;
 }
 
+/**
+ * Erstellt und exportiert den zentralen Applikations-Store.
+ * Der Store wird mit der persist-Middleware ausgestattet, die Theme und
+ * Benutzerzustand im localStorage unter dem Schlüssel "globenews-v2" speichert.
+ */
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -158,12 +253,10 @@ export const useAppStore = create<AppState>()(
         try {
           const response = await fetch("/api/news");
           const data = await response.json();
-          
           if (data.error) {
             set({ newsLoading: false, newsError: data.error });
             return;
           }
-          
           if (data.articles && data.articles.length > 0) {
             set({ news: data.articles, newsLoading: false });
           } else {
@@ -182,20 +275,20 @@ export const useAppStore = create<AppState>()(
 
         return news.filter((item) => {
           if (!item) return false;
-          
-          // Category filter
+
+          // Kategorie-Filter
           if (!filters.categories.includes(item.category)) return false;
 
-          // Importance filter
+          // Wichtigkeits-Filter
           if (!filters.importance.includes(item.importance)) return false;
 
-          // Time filter - handle both Date objects and string timestamps
-          const itemDate = item.timestamp instanceof Date 
-            ? item.timestamp 
+          // Zeitfilter: Unterstützt sowohl Date-Objekte als auch ISO-Strings
+          const itemDate = item.timestamp instanceof Date
+            ? item.timestamp
             : new Date(item.timestamp);
           const hoursDiff =
             (now.getTime() - itemDate.getTime()) / (1000 * 60 * 60);
-          
+
           switch (filters.timeFilter) {
             case "hour":
               if (hoursDiff > 1) return false;
@@ -211,7 +304,7 @@ export const useAppStore = create<AppState>()(
               break;
           }
 
-          // Saved only filter
+          // Gespeicherte-Artikel-Filter
           if (filters.savedOnly && !user.savedItems.includes(item.id))
             return false;
 
@@ -236,25 +329,19 @@ export const useAppStore = create<AppState>()(
       canUseFeature: (feature) => {
         const { user } = get();
         const plan = PLAN_FEATURES[user.plan];
-
         switch (feature) {
-          case "exports":
-            return plan.exports;
-          case "analytics":
-            return plan.analytics;
-          case "alerts":
-            return plan.alerts;
-          case "api":
-            return plan.api;
-          case "whiteLabel":
-            return plan.whiteLabel;
-          default:
-            return true;
+          case "exports":    return plan.exports;
+          case "analytics":  return plan.analytics;
+          case "alerts":     return plan.alerts;
+          case "api":        return plan.api;
+          case "whiteLabel": return plan.whiteLabel;
+          default:           return true;
         }
       },
     }),
     {
       name: "globenews-v2",
+      // Nur Theme und Benutzer persistieren, nicht Nachrichten oder Filter
       partialize: (state) => ({
         theme: state.theme,
         user: state.user,

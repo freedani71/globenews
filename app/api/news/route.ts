@@ -196,7 +196,7 @@ async function geocodeCity(cityName: string, token: string): Promise<{ lat: numb
   return null;
 }
 
-function extractCity(title: string, description: string): string | null {
+export function extractCity(title: string, description: string): string | null {
   const text = `${title} ${description ?? ""}`;
   for (const [pattern, cityName] of CITY_PATTERNS) {
     if (pattern.test(text)) return cityName;
@@ -204,7 +204,7 @@ function extractCity(title: string, description: string): string | null {
   return null;
 }
 
-function detectCountry(title: string, description: string): string {
+export function detectCountry(title: string, description: string): string {
   const text = `${title} ${description ?? ""}`.toLowerCase();
   const patterns: [string, RegExp][] = [
     ["us", /\b(usa|united states|america|washington|new york|california|texas|pentagon|white house)\b/],
@@ -239,7 +239,7 @@ function detectCountry(title: string, description: string): string {
   return "gb";
 }
 
-function detectCategory(sectionId: string, title: string, description: string): Category {
+export function detectCategory(sectionId: string, title: string, description: string): Category {
   if (SECTION_CATEGORY[sectionId]) return SECTION_CATEGORY[sectionId];
   const text = `${title} ${description ?? ""}`.toLowerCase();
   if (text.match(/politi|election|government|president|minister|parliament|vote|war|conflict/)) return "Politics";
