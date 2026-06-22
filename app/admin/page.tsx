@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Shield, Users, Globe, BarChart3, Settings, 
-  Search, Crown, Loader2, ArrowLeft, Trash2,
-  UserCheck, UserX
+import {
+  Shield, Users, Globe, BarChart3,
+  Search, Crown, Loader2, ArrowLeft,
+  UserCheck, UserX, Ban
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,6 +26,7 @@ interface Profile {
   email: string;
   display_name: string;
   is_admin: boolean;
+  is_banned: boolean;
   plan: string;
   created_at: string;
 }
@@ -103,9 +104,21 @@ export default function AdminPage() {
       .from("profiles")
       .update({ is_admin: !currentIsAdmin })
       .eq("id", userId);
-    
-    setProfiles(profiles.map(p => 
+
+    setProfiles(profiles.map(p =>
       p.id === userId ? { ...p, is_admin: !currentIsAdmin } : p
+    ));
+  };
+
+  const toggleBan = async (userId: string, currentIsBanned: boolean) => {
+    const supabase = createClient();
+    await supabase
+      .from("profiles")
+      .update({ is_banned: !currentIsBanned })
+      .eq("id", userId);
+
+    setProfiles(profiles.map(p =>
+      p.id === userId ? { ...p, is_banned: !currentIsBanned } : p
     ));
   };
 
@@ -263,8 +276,8 @@ export default function AdminPage() {
                     className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <span className="text-sm font-medium text-primary">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${profile.is_banned ? "bg-destructive/10" : "bg-primary/10"}`}>
+                        <span className={`text-sm font-medium ${profile.is_banned ? "text-destructive" : "text-primary"}`}>
                           {(profile.display_name || profile.email || "?")[0].toUpperCase()}
                         </span>
                       </div>
@@ -272,14 +285,22 @@ export default function AdminPage() {
                         <p className="font-medium">{profile.display_name || "Unknown"}</p>
                         <p className="text-sm text-muted-foreground">{profile.email}</p>
                       </div>
-                      {profile.is_admin && (
-                        <Badge variant="secondary" className="bg-primary/10 text-primary">
-                          <Shield className="w-3 h-3 mr-1" />
-                          Admin
-                        </Badge>
-                      )}
+                      <div className="flex gap-1 flex-wrap">
+                        {profile.is_admin && (
+                          <Badge variant="secondary" className="bg-primary/10 text-primary">
+                            <Shield className="w-3 h-3 mr-1" />
+                            Admin
+                          </Badge>
+                        )}
+                        {profile.is_banned && (
+                          <Badge variant="secondary" className="bg-destructive/10 text-destructive">
+                            <Ban className="w-3 h-3 mr-1" />
+                            Gesperrt
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2 ml-13 sm:ml-0">
                       <Select
                         value={profile.plan}
@@ -294,18 +315,28 @@ export default function AdminPage() {
                           <SelectItem value="business">Business</SelectItem>
                         </SelectContent>
                       </Select>
-                      
+
                       <Button
                         variant="outline"
                         size="icon"
                         onClick={() => toggleAdmin(profile.id, profile.is_admin)}
-                        title={profile.is_admin ? "Remove admin" : "Make admin"}
+                        title={profile.is_admin ? "Admin entfernen" : "Admin machen"}
                       >
                         {profile.is_admin ? (
                           <UserX className="w-4 h-4" />
                         ) : (
                           <UserCheck className="w-4 h-4" />
                         )}
+                      </Button>
+
+                      <Button
+                        variant={profile.is_banned ? "default" : "outline"}
+                        size="icon"
+                        onClick={() => toggleBan(profile.id, profile.is_banned)}
+                        title={profile.is_banned ? "Entsperren" : "Sperren"}
+                        className={profile.is_banned ? "bg-destructive hover:bg-destructive/90" : "hover:border-destructive hover:text-destructive"}
+                      >
+                        <Ban className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>

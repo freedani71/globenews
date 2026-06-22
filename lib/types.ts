@@ -68,6 +68,8 @@ export interface NewsItem {
   sponsored: boolean;
   /** Optionaler Affiliate-Link für gesponserte Artikel */
   affiliateLink?: string;
+  /** Originaler Link zum Artikel */
+  url?: string;
 }
 
 /**
