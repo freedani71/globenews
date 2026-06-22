@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Globe, Loader2, AlertCircle, Shield, Check, X, Eye, EyeOff } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Globe, Loader2, AlertCircle, Check, X, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +43,6 @@ const STRENGTH_TEXT   = ["", "text-red-500", "text-orange-400", "text-yellow-400
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SignUpPage() {
-  const [isAdmin, setIsAdmin]         = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [emailExists, setEmailExists] = useState(false);
   const [isPending, startTransition]  = useTransition();
@@ -93,7 +91,7 @@ export default function SignUpPage() {
     if (!canSubmit) return;
 
     const formData = new FormData(e.currentTarget);
-    formData.set("isAdmin", isAdmin.toString());
+    formData.set("isAdmin", "false");
 
     startTransition(async () => {
       const result = await signUp(formData);
@@ -267,24 +265,6 @@ export default function SignUpPage() {
                   </ul>
                 </div>
               )}
-            </div>
-
-            {/* Admin-Checkbox */}
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
-              <Checkbox
-                id="isAdmin"
-                checked={isAdmin}
-                onCheckedChange={(checked) => setIsAdmin(checked === true)}
-              />
-              <div className="flex-1">
-                <Label htmlFor="isAdmin" className="flex items-center gap-2 cursor-pointer">
-                  <Shield className="w-4 h-4 text-primary" />
-                  <span className="font-medium">Admin-Konto</span>
-                </Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Vollzugriff auf alle Funktionen und das Admin-Dashboard
-                </p>
-              </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={!canSubmit}>
