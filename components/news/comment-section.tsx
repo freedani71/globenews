@@ -1,11 +1,32 @@
 "use client";
 
+/**
+ * @file comment-section.tsx
+ * @fileoverview Kommentarbereich für einzelne Nachrichtenartikel.
+ *              Lädt und zeigt Kommentare via REST-API, erlaubt eingeloggten Benutzern
+ *              das Verfassen neuer Kommentare und Admins das Löschen von Kommentaren.
+ *
+ * Gesperrt-Zustand (banned):
+ * - Beim Laden der Komponente wird der `is_banned`-Wert des Profils aus Supabase gelesen.
+ * - Antwortet die POST-Route mit `{ banned: true }`, wird `banned` auch clientseitig
+ *   sofort gesetzt — der Nutzer sieht ohne Seitenreload die Sperrmeldung.
+ *
+ * Strg+Enter-Tastenkürzel:
+ * - `onKeyDown`-Handler prüft gleichzeitigen Druck von Ctrl und Enter.
+ * - Ermöglicht schnelles Absenden des Kommentars ohne Mausinteraktion.
+ *
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { useEffect, useState } from "react";
 import { Send, Loader2, MessageCircle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
 
+/** Struktur eines einzelnen Kommentars aus der Datenbank. */
 interface Comment {
   id: string;
   user_name: string;
@@ -13,10 +34,17 @@ interface Comment {
   created_at: string;
 }
 
+/** Props der CommentSection-Komponente. */
 interface CommentSectionProps {
+  /** ID des Artikels, zu dem Kommentare geladen und gepostet werden. */
   articleId: string;
 }
 
+/**
+ * Formatiert einen ISO-Zeitstempel in ein lesbares Datum-/Uhrzeit-Format (de-CH).
+ * @param ts - ISO-Zeitstempel des Kommentars
+ * @returns Formatierte Zeichenkette, z.B. "22.06.2026, 14:35"
+ */
 function formatTime(ts: string) {
   const d = new Date(ts);
   return d.toLocaleDateString("de-CH", {
@@ -28,6 +56,10 @@ function formatTime(ts: string) {
   });
 }
 
+/**
+ * Kommentarbereich für einen einzelnen Artikel.
+ * @param articleId - ID des Artikels (Guardian-ID oder Demo-ID)
+ */
 export default function CommentSection({ articleId }: CommentSectionProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [content, setContent] = useState("");

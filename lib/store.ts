@@ -110,7 +110,18 @@ interface AppState {
   fetchNews: () => Promise<void>;
   /**
    * Gibt die gefilterte Nachrichtenliste basierend auf dem aktuellen Filterzustand zurück.
-   * Berücksichtigt: Kategorien, Wichtigkeit, Zeitfilter, gespeicherte Artikel.
+   *
+   * Filterschritte in Reihenfolge:
+   * 1. Volltextsuche in Titel, Beschreibung und Quelle (case-insensitive)
+   * 2. Kategoriefilter — auf plan-abhängiges Maximum begrenzt
+   * 3. Wichtigkeitsfilter — nur ausgewählte Stufen
+   * 4. Kontinent/Region via Bounding-Box-Prüfung der Artikelkoordinaten
+   * 5. Zeitfilter — Free-Plan wird auf "today" gedeckelt
+   * 6. Gespeicherte-Artikel-Filter (nur mit Premium-Plan sinnvoll nutzbar)
+   *
+   * Bounding-Box-Format je Kontinent: `[latMin, latMax, lngMin, lngMax]`
+   * Die Boxen sind vereinfachte Näherungen, keine exakten Ländergrenzen.
+   *
    * @returns Gefiltertes Array von NewsItems
    */
   filteredNews: () => NewsItem[];
@@ -303,7 +314,10 @@ export const useAppStore = create<AppState>()(
           // Importance
           if (!filters.importance.includes(item.importance)) return false;
 
-          // Region/continent filter via bounding box
+          // Bounding-Box-Filter: Artikelkoordinaten müssen innerhalb des gewählten
+          // Kontinentrechtecks [latMin, latMax, lngMin, lngMax] liegen.
+          // Achtung: Oceania überschreitet den Antimeridian (180°) nicht —
+          // Artikel im östlichen Pazifik könnten fälschlicherweise ausgeschlossen werden.
           if (filters.region !== "all") {
             const bounds: Record<string, [number, number, number, number]> = {
               africa:           [-35,  37, -18,  51],
@@ -322,7 +336,8 @@ export const useAppStore = create<AppState>()(
             }
           }
 
-          // Time (free plan capped at "today")
+          // Free-Plan-Nutzer können keinen Archiv-Filter umgehen, indem sie den Store
+          // direkt manipulieren — der effektive Filter wird hier nochmals serverseitig gedeckelt.
           const effectiveTimeFilter =
             user.plan === "free" && (filters.timeFilter === "week" || filters.timeFilter === "month")
               ? "today"

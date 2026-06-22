@@ -1,5 +1,16 @@
 "use client";
 
+/**
+ * @file filter-sidebar.tsx
+ * @fileoverview Filterleiste der GlobeNews-Applikation.
+ *              Ermöglicht die Filterung von Nachrichtenartikeln nach Kategorie,
+ *              Zeitraum, Region und Wichtigkeit. Plan-abhängige Funktionen sind
+ *              gesperrt und lösen bei Auswahl die Paywall-Modal aus.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { useState } from "react";
 import {
   SlidersHorizontal,
@@ -55,6 +66,10 @@ const importanceLevels: { value: Importance; label: string; color: string }[] = 
   { value: "General", label: "Allgemein", color: "text-muted-foreground" },
 ];
 
+/**
+ * Einfaches Label-Element für Filterabschnitte in der Sidebar.
+ * @param children - Anzuzeigender Text des Abschnittstitels
+ */
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2.5">
@@ -63,8 +78,26 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Standard-Kategorien, die beim Zurücksetzen der Filter wiederhergestellt werden. */
 const DEFAULT_CATEGORIES: Category[] = ["Politics", "Business", "Technology"];
 
+/**
+ * Filterleiste mit kollabierter und ausgeklappter Ansicht.
+ *
+ * activeFilterCount-Logik:
+ * - Zählt nur «nicht-Standard»-Abweichungen: Region ≠ "all", Zeitfilter ≠ "today",
+ *   weniger als alle 3 Wichtigkeitsstufen aktiv, savedOnly an, heatmapMode an.
+ * - Kategorien werden bewusst nicht mitgezählt, da sie keine binäre An/Aus-Logik haben.
+ *
+ * resetFilters:
+ * - Setzt Kategorien, Zeitfilter, Region und Wichtigkeit auf die Free-Plan-Defaults zurück.
+ * - savedOnly und heatmapMode werden nicht zurückgesetzt (Ansichts-Präferenzen).
+ *
+ * Plan-basierte Sperren:
+ * - Zeitfilter "week" und "month" sind für Free-Nutzer gesperrt.
+ * - Überschreiten des Kategorielimits öffnet die Paywall; das Limit hängt vom Plan ab.
+ * - Die "Gespeichert"-Umschaltfläche zeigt ein Schloss-Icon für Free-Nutzer.
+ */
 export default function FilterSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const {
@@ -82,6 +115,8 @@ export default function FilterSidebar() {
   const plan = PLAN_FEATURES[user.plan];
   const maxCategories = plan.maxCategories;
 
+  // Jede Bedingung ergibt true, wenn der Filter vom Standard abweicht.
+  // Boolean-Array wird gefiltert und gezählt → Anzahl aktiver Nicht-Standard-Filter.
   const activeFilterCount = [
     filters.region !== "all",
     filters.timeFilter !== "today",
@@ -121,6 +156,12 @@ export default function FilterSidebar() {
     }
   };
 
+  /**
+   * Prüft ob ein Zeitfilter für den aktuellen Benutzerplan gesperrt ist.
+   * Free-Nutzer dürfen nur "hour" und "today" verwenden.
+   * @param value - Zu prüfender Zeitfilter
+   * @returns true wenn der Filter für den aktuellen Plan gesperrt ist
+   */
   const isTimeFilterLocked = (value: TimeFilter) =>
     user.plan === "free" && (value === "week" || value === "month");
 

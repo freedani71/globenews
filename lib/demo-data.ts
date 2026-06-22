@@ -1,11 +1,34 @@
+/**
+ * @file demo-data.ts
+ * @fileoverview Statische Demodaten für die GlobeNews-Applikation.
+ *              Wird als Fallback verwendet, wenn die Guardian API nicht erreichbar ist
+ *              oder kein API-Schlüssel konfiguriert wurde. Enthält 30 fiktive aber
+ *              realistische Nachrichtenartikel über alle Kategorien, Wichtigkeitsstufen
+ *              und Zeiträume verteilt sowie die Kontinent- und Länderlisten für Filter-UI.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import type { NewsItem, Category, Importance } from "./types";
 
+/** Referenzzeitpunkt für alle relativen Zeitstempel in den Demodaten. */
 const now = new Date();
 
+/**
+ * Berechnet ein Datum, das eine bestimmte Anzahl Stunden in der Vergangenheit liegt.
+ * @param hours - Anzahl vergangener Stunden
+ * @returns Date-Objekt relativ zu `now`
+ */
 function hoursAgo(hours: number): Date {
   return new Date(now.getTime() - hours * 60 * 60 * 1000);
 }
 
+/**
+ * Berechnet ein Datum, das eine bestimmte Anzahl Tage in der Vergangenheit liegt.
+ * @param days - Anzahl vergangener Tage
+ * @returns Date-Objekt relativ zu `now`
+ */
 function daysAgo(days: number): Date {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 }
@@ -414,6 +437,12 @@ export const demoNews: NewsItem[] = [
   },
 ];
 
+/**
+ * Kontinentliste für den Regionsfilter in der FilterSidebar.
+ * Jedes Objekt enthält einen `value` (wird für Bounding-Box-Lookup im Store verwendet)
+ * und ein `label` (wird in der UI angezeigt).
+ * Der Eintrag `{ value: "all" }` deaktiviert den Regionsfilter.
+ */
 export const continents = [
   { value: "all", label: "All Continents" },
   { value: "africa", label: "Africa" },
@@ -424,6 +453,12 @@ export const continents = [
   { value: "oceania", label: "Oceania" },
 ];
 
+/**
+ * Liste der häufigsten Länder für den Länderfilter.
+ * Wird in der FilterSidebar als Dropdown-Optionen angeboten.
+ * Die Strings entsprechen den Ländernamen in Englisch, da sie
+ * mit den Erkennungsmustern in `detectCountry` übereinstimmen müssen.
+ */
 export const countries = [
   "United States",
   "United Kingdom",

@@ -1,3 +1,15 @@
+/**
+ * @file route.ts
+ * @fileoverview Next.js Route Handler für die Kommentar-API (/api/comments).
+ *              Unterstützt GET (Kommentare laden), POST (Kommentar schreiben)
+ *              und DELETE (Kommentar löschen, nur für Autor oder Admin).
+ *              Enthält serverseitige Eingabevalidierung, HTML-Sanitierung und
+ *              automatische Sperr-Logik bei beleidigenden Inhalten.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -24,7 +36,12 @@ const INSULT_WORDS = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Strip HTML tags and HTML entities to prevent stored XSS. */
+/**
+ * Entfernt HTML-Tags, HTML-Entities, JavaScript-Protokolle und Inline-Event-Handler
+ * aus einem String, um gespeichertes XSS (stored XSS) zu verhindern.
+ * @param text - Zu bereinigender Rohtext
+ * @returns Bereinigter Plain-Text ohne HTML-Konstrukte
+ */
 function stripHtml(text: string): string {
   return text
     .replace(/<[^>]*>/g, "")           // remove all HTML tags
@@ -33,6 +50,14 @@ function stripHtml(text: string): string {
     .replace(/on\w+\s*=/gi, "");       // remove inline event handlers
 }
 
+/**
+ * Prüft ob ein Text Beleidigungen aus der `INSULT_WORDS`-Liste enthält.
+ * Der Text wird normalisiert (Kleinbuchstaben, Sonderzeichen entfernt) und
+ * anschliessend sowohl per Wortgrenze-Regex als auch per `includes` geprüft,
+ * um Varianten mit Satzzeichen dazwischen zu erfassen.
+ * @param text - Zu prüfender Kommentartext (bereits sanitiert)
+ * @returns true wenn mindestens ein verbotenes Wort gefunden wurde
+ */
 function containsInsult(text: string): boolean {
   const normalized = text.toLowerCase().replace(/[^a-züöäß\s]/g, "");
   return INSULT_WORDS.some((word) => {
@@ -41,6 +66,12 @@ function containsInsult(text: string): boolean {
   });
 }
 
+/**
+ * Validiert eine Artikel-ID auf Typ, Länge und erlaubte Zeichen.
+ * Akzeptiert Guardian-IDs (z.B. "world/2024/jan/01/slug") sowie einfache Demo-IDs ("1").
+ * @param id - Zu prüfende Artikel-ID (unbekannter Typ aus Request)
+ * @returns Fehlermeldung als String oder null bei gültiger ID
+ */
 function validateArticleId(id: unknown): string | null {
   if (typeof id !== "string" || !id) return "articleId fehlt.";
   if (id.length > MAX_ARTICLE_ID)    return "articleId zu lang.";
@@ -50,6 +81,11 @@ function validateArticleId(id: unknown): string | null {
 
 // ── GET /api/comments?articleId=… ────────────────────────────────────────────
 
+/**
+ * Gibt alle Kommentare für einen Artikel chronologisch aufsteigend zurück.
+ * @param request - Next.js-Request-Objekt mit Query-Parameter `articleId`
+ * @returns JSON `{ comments: Comment[] }` oder Fehlerobjekt
+ */
 export async function GET(request: NextRequest) {
   const articleId = request.nextUrl.searchParams.get("articleId");
 
@@ -69,6 +105,14 @@ export async function GET(request: NextRequest) {
 
 // ── POST /api/comments ────────────────────────────────────────────────────────
 
+/**
+ * Erstellt einen neuen Kommentar für einen Artikel.
+ * Ablauf: Authentifizierung → Validierung → HTML-Sanitierung → Sperr-Prüfung →
+ * Beleidigungs-Check (bei Verstos: automatische Sperre) → Datenbankinsert.
+ * @param request - Next.js-Request-Objekt mit JSON-Body `{ articleId, content }`
+ * @returns JSON `{ comment }` des neu erstellten Kommentars oder Fehlerobjekt.
+ *          Bei Sperre enthält das Fehlerobjekt zusätzlich `{ banned: true }`.
+ */
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -161,6 +205,13 @@ export async function POST(request: NextRequest) {
 
 // ── DELETE /api/comments?id=… ─────────────────────────────────────────────────
 
+/**
+ * Löscht einen Kommentar anhand seiner UUID.
+ * Admins dürfen jeden Kommentar löschen; reguläre Nutzer nur ihre eigenen
+ * (serverseitig durch `.eq("user_id", user.id)` in der DB-Query erzwungen).
+ * @param request - Next.js-Request-Objekt mit Query-Parameter `id` (Kommentar-UUID)
+ * @returns JSON `{ success: true }` oder Fehlerobjekt
+ */
 export async function DELETE(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

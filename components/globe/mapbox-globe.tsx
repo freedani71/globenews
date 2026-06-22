@@ -1,5 +1,15 @@
 "use client";
 
+/**
+ * @file mapbox-globe.tsx
+ * @fileoverview 3D-Globus-Komponente der GlobeNews-Applikation auf Basis von Mapbox GL JS.
+ *              Rendert Nachrichtenartikel als interaktive Marker auf einem Satelliten-Globus
+ *              und gruppiert räumlich nahe Artikel zu Cluster-Markern.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { useRef, useState, useEffect, useMemo } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -7,8 +17,17 @@ import { useAppStore } from "@/lib/store";
 import type { NewsItem } from "@/lib/types";
 import { CATEGORY_COLORS } from "@/lib/types";
 
+/**
+ * Sortierreihenfolge der Wichtigkeitsstufen.
+ * Breaking (0) erscheint vor Top (1) und General (2).
+ */
 const IMPORTANCE_ORDER: Record<string, number> = { Breaking: 0, Top: 1, General: 2 };
 
+/**
+ * Gibt die vergangene Zeit seit einem Zeitstempel als kompakte Zeichenkette zurück.
+ * @param ts - Datum als Date-Objekt oder ISO-String
+ * @returns Formatierter Zeitabstand, z.B. "5m", "2h" oder "3d"
+ */
 function timeAgo(ts: Date | string): string {
   const diff = Date.now() - new Date(ts).getTime();
   const m = Math.floor(diff / 60000);
@@ -18,6 +37,26 @@ function timeAgo(ts: Date | string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+/**
+ * Interaktiver 3D-Globus-Viewer mit Nachrichtenmarkern.
+ *
+ * Architektur der Marker-DOM-Struktur:
+ * - Äusseres Element (`el`): wird von Mapbox GL für die Projektionstransformation
+ *   (lat/lng → Bildschirmkoordinaten) vollständig kontrolliert. Dieses Element
+ *   darf **nicht** animiert werden, da Mapbox dessen `transform`-Style überschreibt.
+ * - Inneres Element (`dot`): liegt sicher innerhalb des Mapbox-Containers und kann
+ *   beliebig animiert werden (Hover-Scale, Pulse-Ring usw.).
+ *
+ * Cluster-Logik:
+ * - Artikel werden nach auf eine Dezimalstelle gerundeten Koordinaten gruppiert.
+ * - Eine Dezimalstelle entspricht ca. 11 km Genauigkeit, was urbane Gebiete
+ *   sinnvoll zusammenfasst, ohne entfernte Städte zu vermischen.
+ *
+ * Pulse-Ring-Animation:
+ * - Breaking-Einzelmarker erhalten ein absolut positioniertes Pseudo-Element,
+ *   das per CSS-Keyframe-Animation (`pulse-ring`) nach aussen schwingt und ausbleidet.
+ *   Der Ring ist `pointer-events: none`, damit er keine Klick-Events abfängt.
+ */
 export default function MapboxGlobe() {
   const filteredNews = useAppStore((state) => state.filteredNews);
   const setSelectedNews = useAppStore((state) => state.setSelectedNews);
@@ -50,7 +89,8 @@ export default function MapboxGlobe() {
     fetchToken();
   }, []);
 
-  // Recompute whenever any dependency of filteredNews() changes
+  // filteredNews() ist eine Funktion im Store — useMemo abonniert die relevanten
+  // State-Felder explizit, damit React-Memoization korrekt funktioniert.
   const news = useMemo(() => {
     try {
       const result = filteredNews();
@@ -117,7 +157,9 @@ export default function MapboxGlobe() {
     markersRef.current = [];
     popupRef.current?.remove();
 
-    // Group by rounded coordinate (1 decimal ≈ 11 km)
+    // Koordinaten auf eine Dezimalstelle runden → Cluster-Schlüssel.
+    // 0.1° ≈ 11 km: nahe genug um städtische Häufungen zu bündeln,
+    // weit genug um benachbarte Grossstädte getrennt zu halten.
     const groups = new Map<string, NewsItem[]>();
     news.forEach((item) => {
       const key = `${item.lat.toFixed(1)},${item.lng.toFixed(1)}`;
@@ -144,7 +186,9 @@ export default function MapboxGlobe() {
         : isBreaking ? 20 : isTop ? 15 : 11;
       const glowSize = isBreaking ? 14 : isTop ? 8 : 5;
 
-      // Outer: Mapbox owns the transform — never touch it
+      // Äusserer Container: Mapbox GL schreibt hier den Positions-Transform.
+      // Keine CSS-Animationen oder transform-Änderungen auf diesem Element —
+      // sie würden von Mapbox bei jedem Frame überschrieben.
       const el = document.createElement("div");
       el.style.cssText = `width:${size}px;height:${size}px;cursor:pointer;`;
 
@@ -215,7 +259,8 @@ export default function MapboxGlobe() {
             curve: 1.2,
           });
 
-          // Resolved colors — CSS vars don't work inside Mapbox popup DOM
+          // Farben werden vorab aufgelöst: CSS-Variablen (z.B. hsl(var(--card))) sind
+          // im Mapbox-Popup-DOM nicht verfügbar, da es ausserhalb des Next.js-Render-Baums sitzt.
           const isDark = theme === "dark";
           const bg       = isDark ? "#1c1c2e" : "#ffffff";
           const fg       = isDark ? "#f0f0f0" : "#1a1a1a";

@@ -1,11 +1,27 @@
 "use client";
 
+/**
+ * @file feed-view.tsx
+ * @fileoverview Listen-Ansicht der GlobeNews-Applikation.
+ *              Zeigt alle gefilterten Nachrichtenartikel als scrollbare Kartenlist an.
+ *              Dient als Alternative zur Globus-Ansicht und erlaubt das Speichern
+ *              von Artikeln per Lesezeichen-Button direkt in der Liste.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { Clock, Bookmark, ExternalLink, Tag, Search } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { CATEGORY_COLORS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 
+/**
+ * Gibt die vergangene Zeit seit einem Zeitstempel als kompakte Zeichenkette zurück.
+ * @param ts - Datum als Date-Objekt oder ISO-String
+ * @returns Formatierter Zeitabstand, z.B. "5m", "2h" oder "3d"
+ */
 function timeAgo(ts: Date | string): string {
   const ms = Date.now() - new Date(ts).getTime();
   const m = Math.floor(ms / 60000);
@@ -16,6 +32,12 @@ function timeAgo(ts: Date | string): string {
   return `${d}d`;
 }
 
+/**
+ * Listenansicht aller gefilterten Nachrichtenartikel.
+ * Zeigt bei leerem Ergebnis einen kontextsensitiven Hinweistext an
+ * (Suchbegriff vorhanden vs. nur Filter aktiv).
+ * Bei Free-Plan wird nach dem vierten Artikel eine Upgrade-Aufforderung eingeblendet.
+ */
 export default function FeedView() {
   const { filteredNews, setSelectedNews, user, toggleSavedItem, searchQuery } = useAppStore();
   const news = filteredNews();

@@ -1,3 +1,14 @@
+/**
+ * @file route.ts
+ * @fileoverview Next.js Route Handler für die News-API (/api/news).
+ *              Ruft Artikel von der Guardian Content API ab, reichert sie mit
+ *              geografischen Koordinaten (via Mapbox Geocoding oder Länder-Fallback)
+ *              an und gibt sie als NewsItem-Array zurück.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { NextResponse } from "next/server";
 
 type Category = "Politics" | "Business" | "Technology" | "Sports" | "Entertainment" | "Science" | "Environment" | "Health";
@@ -177,8 +188,16 @@ const SECTION_GROUPS = [
   ["sport", "culture", "environment", "lifeandstyle"],
 ];
 
+/** In-Memory-Cache für bereits geocodierte Städtenamen, um API-Aufrufe zu reduzieren. */
 const geocodeCache = new Map<string, { lat: number; lng: number }>();
 
+/**
+ * Geocodiert einen Städtenamen über die Mapbox Places API.
+ * Ergebnisse werden in `geocodeCache` gespeichert, um Mehrfachanfragen zu vermeiden.
+ * @param cityName - Name der zu geocodierenden Stadt (englischer Standardname)
+ * @param token - Mapbox Access Token für die API-Authentifizierung
+ * @returns Koordinatenobjekt `{ lat, lng }` oder null bei Fehler / keinem Ergebnis
+ */
 async function geocodeCity(cityName: string, token: string): Promise<{ lat: number; lng: number } | null> {
   if (geocodeCache.has(cityName)) return geocodeCache.get(cityName)!;
   try {
@@ -196,6 +215,14 @@ async function geocodeCity(cityName: string, token: string): Promise<{ lat: numb
   return null;
 }
 
+/**
+ * Durchsucht Titel und Beschreibung eines Artikels nach bekannten Städtenamen.
+ * Verwendet vorkompilierte reguläre Ausdrücke aus `CITY_PATTERNS` mit Wortgrenzen,
+ * um Teilstring-Treffer (z.B. "Lima" in "Imalaya") zu vermeiden.
+ * @param title - Artikel-Titel
+ * @param description - Artikel-Beschreibungstext (Teaser)
+ * @returns Standardisierter Stadtname (z.B. "New York City") oder null wenn nicht gefunden
+ */
 export function extractCity(title: string, description: string): string | null {
   const text = `${title} ${description ?? ""}`;
   for (const [pattern, cityName] of CITY_PATTERNS) {
@@ -204,6 +231,15 @@ export function extractCity(title: string, description: string): string | null {
   return null;
 }
 
+/**
+ * Erkennt das wahrscheinlichste Land eines Artikels anhand von Schlüsselwörtern
+ * in Titel und Beschreibung. Gibt den zweistelligen ISO-3166-1-Ländercode zurück.
+ * Fällt auf "gb" (Grossbritannien) zurück, da ein Grossteil der Guardian-Artikel
+ * UK-Bezug hat.
+ * @param title - Artikel-Titel
+ * @param description - Artikel-Beschreibungstext (Teaser)
+ * @returns Zweistelliger Ländercode (ISO 3166-1 alpha-2), z.B. "us", "de", "cn"
+ */
 export function detectCountry(title: string, description: string): string {
   const text = `${title} ${description ?? ""}`.toLowerCase();
   const patterns: [string, RegExp][] = [
@@ -239,6 +275,15 @@ export function detectCountry(title: string, description: string): string {
   return "gb";
 }
 
+/**
+ * Bestimmt die Nachrichtenkategorie anhand der Guardian-Section-ID und,
+ * falls keine direkte Zuordnung vorhanden ist, per Keyword-Matching in Titel und Beschreibung.
+ * Fällt auf "Politics" zurück, wenn kein Muster übereinstimmt.
+ * @param sectionId - Guardian-Section-ID (z.B. "world", "technology")
+ * @param title - Artikel-Titel
+ * @param description - Artikel-Beschreibungstext (Teaser)
+ * @returns Passende Kategorie aus dem `Category`-Typ
+ */
 export function detectCategory(sectionId: string, title: string, description: string): Category {
   if (SECTION_CATEGORY[sectionId]) return SECTION_CATEGORY[sectionId];
   const text = `${title} ${description ?? ""}`.toLowerCase();
@@ -277,11 +322,22 @@ async function fetchGuardianSection(
   }
 }
 
+/**
+ * Whitelist aller gültigen Kategorie-Werte für den `category`-Query-Parameter.
+ * Verhindert das Weiterleiten beliebiger Strings an die Guardian API.
+ */
 const ALLOWED_CATEGORIES = new Set([
   "Politics", "Business", "Technology", "Sports",
   "Entertainment", "Science", "Environment", "Health",
 ]);
 
+/**
+ * Bereinigt einen freien Suchbegriff für die Weiterleitung an die Guardian API.
+ * Entfernt XSS-Vektoren (`<>"'\``), behält nur alphanumerische Zeichen sowie
+ * `\s`, `-`, `.` und `,` und kürzt auf maximal 100 Zeichen.
+ * @param raw - Roher Query-String aus dem HTTP-Request
+ * @returns Bereinigter und gekürzter Suchbegriff
+ */
 function sanitizeQuery(raw: string): string {
   return raw
     .trim()
@@ -290,6 +346,23 @@ function sanitizeQuery(raw: string): string {
     .slice(0, 100);              // max length
 }
 
+/**
+ * Lädt Nachrichtenartikel von der Guardian Content API und reichert sie mit
+ * geografischen Koordinaten an.
+ *
+ * Koordinaten-Strategie (für jeden Artikel):
+ * 1. Stadtname im Titel/Beschreibung gefunden → Mapbox Geocoding API
+ * 2. Kein Stadtname → Länder-Erkennung per Keyword → Koordinaten aus `COUNTRY_COORDINATES`
+ * 3. Land nicht erkannt → Fallback auf "gb" (London)
+ *
+ * Wichtigkeitsstufen werden anhand der Reihenfolge im Guardian-Ergebnis vergeben:
+ * - Index 0–4: "Breaking", Index 5–24: "Top", ab Index 25: "General"
+ *
+ * @param request - HTTP-GET-Request mit optionalen Query-Parametern `category` und `q`
+ * @returns JSON `{ articles: NewsItem[], totalResults: number }` oder Fehlerobjekt
+ * @throws Gibt HTTP 500 zurück wenn der Guardian API Key fehlt
+ * @throws Gibt HTTP 502 zurück wenn die Guardian API keine Artikel liefert
+ */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 

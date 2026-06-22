@@ -1,5 +1,16 @@
 "use client";
 
+/**
+ * @file news-popup.tsx
+ * @fileoverview Detailansicht eines einzelnen Nachrichtenartikels als modales Overlay.
+ *              Zeigt Bild, Titel, Beschreibung, Metadaten, Aktionsschaltflächen
+ *              (Speichern, Teilen, Artikel öffnen) sowie die Kommentarsektion an.
+ *              Wird durch `selectedNews` im Zustand-Store gesteuert.
+ * @author Projektteam GlobeNews
+ * @version 1.0
+ * @date 2026-05-20
+ */
+
 import { X, Bookmark, Share2, ExternalLink, Clock, MapPin, Tag } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { CATEGORY_COLORS } from "@/lib/types";
@@ -7,6 +18,11 @@ import { cn } from "@/lib/utils";
 import Image from "next/image";
 import CommentSection from "./comment-section";
 
+/**
+ * Gibt die vergangene Zeit seit einem Zeitstempel in ausgeschriebener Form zurück.
+ * @param ts - Datum als Date-Objekt oder ISO-String
+ * @returns Formatierter Zeitabstand, z.B. "vor 5 Min.", "vor 2 Std." oder "vor 3 Tagen"
+ */
 function timeAgo(ts: Date | string): string {
   const ms = Date.now() - new Date(ts).getTime();
   const m = Math.floor(ms / 60000);
@@ -17,6 +33,12 @@ function timeAgo(ts: Date | string): string {
   return `vor ${d} Tagen`;
 }
 
+/**
+ * Modales Overlay für die Detailansicht eines Artikels.
+ * Rendert nichts, solange kein Artikel im Store als `selectedNews` gesetzt ist.
+ * Der Teilen-Button nutzt die Web Share API, falls verfügbar,
+ * und fällt andernfalls auf Clipboard-Kopieren zurück.
+ */
 export default function NewsPopup() {
   const { selectedNews, setSelectedNews, user, toggleSavedItem } = useAppStore();
   if (!selectedNews) return null;
