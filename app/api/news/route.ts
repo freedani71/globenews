@@ -277,10 +277,31 @@ async function fetchGuardianSection(
   }
 }
 
+const ALLOWED_CATEGORIES = new Set([
+  "Politics", "Business", "Technology", "Sports",
+  "Entertainment", "Science", "Environment", "Health",
+]);
+
+function sanitizeQuery(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[<>"'`]/g, "")   // strip XSS vectors
+    .replace(/[^\w\s\-.,]/g, "") // keep only safe chars
+    .slice(0, 100);              // max length
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const categoryFilter = searchParams.get("category") || "";
-  const query = searchParams.get("q") || "";
+
+  const rawCategory = searchParams.get("category") || "";
+  const rawQuery    = searchParams.get("q") || "";
+
+  // Validate category against allowed list
+  const categoryFilter =
+    rawCategory && ALLOWED_CATEGORIES.has(rawCategory) ? rawCategory : "";
+
+  // Sanitize free-text search query
+  const query = sanitizeQuery(rawQuery);
 
   const apiKey = process.env.GUARDIAN_API_KEY;
   const mapboxToken = process.env.MAPBOX_TOKEN;
@@ -337,6 +358,7 @@ export async function GET(request: Request) {
       lng: coordResults[index].lng,
       importance: (index < 5 ? "Breaking" : index < 25 ? "Top" : "General") as Importance,
       sponsored: false,
+      url: article.webUrl ?? "",
     }));
 
     return NextResponse.json({ articles: newsItems, totalResults: newsItems.length });

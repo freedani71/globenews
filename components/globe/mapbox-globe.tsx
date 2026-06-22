@@ -6,19 +6,16 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useAppStore } from "@/lib/store";
 import type { NewsItem } from "@/lib/types";
 import { CATEGORY_COLORS } from "@/lib/types";
-import { X, ExternalLink, Bookmark, Share2 } from "lucide-react";
 
-function formatTimeAgo(timestamp: Date | string): string {
-  const now = new Date();
-  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+const IMPORTANCE_ORDER: Record<string, number> = { Breaking: 0, Top: 1, General: 2 };
 
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${diffDays}d ago`;
+function timeAgo(ts: Date | string): string {
+  const diff = Date.now() - new Date(ts).getTime();
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(diff / 3600000);
+  if (m < 60) return `${m}m`;
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(diff / 86400000)}d`;
 }
 
 export default function MapboxGlobe() {
@@ -26,6 +23,9 @@ export default function MapboxGlobe() {
   const setSelectedNews = useAppStore((state) => state.setSelectedNews);
   const storeNews = useAppStore((state) => state.news);
   const filters = useAppStore((state) => state.filters);
+  const searchQuery = useAppStore((state) => state.searchQuery);
+  const user = useAppStore((state) => state.user);
+  const theme = useAppStore((state) => state.theme);
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -35,19 +35,14 @@ export default function MapboxGlobe() {
   const [mapboxToken, setMapboxToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<NewsItem | null>(null);
 
-  // Fetch Mapbox token from API
   useEffect(() => {
     async function fetchToken() {
       try {
         const res = await fetch("/api/mapbox-token");
         const data = await res.json();
-        if (data.error) {
-          setTokenError(data.error);
-        } else {
-          setMapboxToken(data.token);
-        }
+        if (data.error) setTokenError(data.error);
+        else setMapboxToken(data.token);
       } catch {
         setTokenError("Failed to load map");
       }
@@ -55,7 +50,7 @@ export default function MapboxGlobe() {
     fetchToken();
   }, []);
 
-  // Get filtered news — useMemo ensures stable reference, only recomputes when news/filters change
+  // Recompute whenever any dependency of filteredNews() changes
   const news = useMemo(() => {
     try {
       const result = filteredNews();
@@ -73,7 +68,7 @@ export default function MapboxGlobe() {
       return [];
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeNews, filters]);
+  }, [storeNews, filters, searchQuery, user, theme]);
 
   // Initialize map
   useEffect(() => {
@@ -91,8 +86,6 @@ export default function MapboxGlobe() {
 
     map.current.on("style.load", () => {
       if (!map.current) return;
-      
-      // Add fog/atmosphere effect for realistic Earth look
       map.current.setFog({
         color: "rgb(186, 210, 235)",
         "high-color": "rgb(36, 92, 223)",
@@ -100,11 +93,13 @@ export default function MapboxGlobe() {
         "space-color": "rgb(11, 11, 25)",
         "star-intensity": 0.6,
       });
-
       setMapLoaded(true);
     });
 
-    // Add navigation controls
+    map.current.on("click", () => {
+      popupRef.current?.remove();
+    });
+
     map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
 
     return () => {
@@ -114,100 +109,254 @@ export default function MapboxGlobe() {
     };
   }, [mapboxToken]);
 
-  // Update markers when news changes
+  // Build markers — cluster items at same location
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    // Remove existing markers
-    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
+    popupRef.current?.remove();
 
-    // Add new markers
+    // Group by rounded coordinate (1 decimal ≈ 11 km)
+    const groups = new Map<string, NewsItem[]>();
     news.forEach((item) => {
-      const color = item.sponsored
-        ? CATEGORY_COLORS.Sponsored
-        : CATEGORY_COLORS[item.category] || CATEGORY_COLORS.Politics;
-      const isBreaking = item.importance === "Breaking";
+      const key = `${item.lat.toFixed(1)},${item.lng.toFixed(1)}`;
+      const g = groups.get(key) ?? [];
+      g.push(item);
+      groups.set(key, g);
+    });
 
-      // Create marker element
+    groups.forEach((items) => {
+      // Sort Breaking → Top → General, newest first within tier
+      const sorted = [...items].sort((a, b) => {
+        const diff = IMPORTANCE_ORDER[a.importance] - IMPORTANCE_ORDER[b.importance];
+        if (diff !== 0) return diff;
+        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+      });
+
+      const top = sorted[0];
+      const isCluster = sorted.length > 1;
+      const color = CATEGORY_COLORS[top.category] || CATEGORY_COLORS.Politics;
+      const isBreaking = top.importance === "Breaking";
+      const isTop = top.importance === "Top";
+      const size = isCluster
+        ? Math.min(26 + sorted.length * 1.5, 38)
+        : isBreaking ? 20 : isTop ? 15 : 11;
+      const glowSize = isBreaking ? 14 : isTop ? 8 : 5;
+
+      // Outer: Mapbox owns the transform — never touch it
       const el = document.createElement("div");
-      el.className = "news-marker";
-      el.style.cssText = `
-        width: ${isBreaking ? 18 : 14}px;
-        height: ${isBreaking ? 18 : 14}px;
+      el.style.cssText = `width:${size}px;height:${size}px;cursor:pointer;`;
+
+      // Inner: safe to animate
+      const dot = document.createElement("div");
+      dot.style.cssText = `
+        position: relative;
+        width: 100%;
+        height: 100%;
         background-color: ${color};
         border-radius: 50%;
-        border: 2px solid rgba(255,255,255,0.8);
-        box-shadow: 0 0 ${isBreaking ? 12 : 8}px ${color};
-        cursor: pointer;
-        transition: box-shadow 0.2s ease;
+        border: ${isCluster || isBreaking ? "2px" : "1.5px"} solid rgba(255,255,255,${isBreaking || isCluster ? 0.9 : 0.6});
+        box-shadow: 0 0 ${glowSize}px ${color}cc;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       `;
+      el.appendChild(dot);
+
+      // Cluster count badge
+      if (isCluster) {
+        const badge = document.createElement("span");
+        badge.style.cssText = `
+          color: #fff;
+          font-size: ${sorted.length > 9 ? "9" : "10"}px;
+          font-weight: 800;
+          line-height: 1;
+          pointer-events: none;
+        `;
+        badge.textContent = String(sorted.length);
+        dot.appendChild(badge);
+      }
+
+      // Pulse ring for breaking single markers
+      if (isBreaking && !isCluster) {
+        const pulse = document.createElement("div");
+        pulse.style.cssText = `
+          position: absolute;
+          inset: -5px;
+          border-radius: 50%;
+          border: 1.5px solid ${color}88;
+          animation: pulse-ring 1.8s ease-out infinite;
+          pointer-events: none;
+        `;
+        dot.appendChild(pulse);
+      }
 
       el.addEventListener("mouseenter", () => {
-        el.style.boxShadow = `0 0 20px ${color}, 0 0 30px ${color}`;
+        dot.style.transform = "scale(1.4)";
+        dot.style.boxShadow = `0 0 ${glowSize * 2}px ${color}, 0 0 ${glowSize * 3}px ${color}55`;
       });
       el.addEventListener("mouseleave", () => {
-        el.style.boxShadow = `0 0 ${isBreaking ? 12 : 8}px ${color}`;
+        dot.style.transform = "scale(1)";
+        dot.style.boxShadow = `0 0 ${glowSize}px ${color}cc`;
       });
 
-      el.addEventListener("click", () => {
-        setSelectedItem(item);
-        setSelectedNews(item);
+      if (isCluster) {
+        // Cluster click → popup with scrollable article list
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          popupRef.current?.remove();
 
-        // Close existing popup
-        if (popupRef.current) {
-          popupRef.current.remove();
-        }
+          map.current?.flyTo({
+            center: [top.lng, top.lat],
+            zoom: Math.max(map.current.getZoom(), 3),
+            speed: 1.4,
+            curve: 1.2,
+          });
 
-        // Create popup content
-        const popupContent = document.createElement("div");
-        popupContent.innerHTML = `
-          <div style="background: var(--card); border-radius: 12px; overflow: hidden; min-width: 280px; max-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
-            ${item.imageUrl ? `
-              <div style="position: relative; height: 120px; overflow: hidden;">
-                <img src="${item.imageUrl}" alt="" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'" />
-                <div style="position: absolute; inset: 0; background: linear-gradient(to top, var(--card), transparent);"></div>
-              </div>
-            ` : ""}
-            <div style="padding: 12px;">
-              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                <span style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color};"></span>
-                <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: ${color};">
-                  ${item.sponsored ? "Sponsored" : item.category}
-                </span>
-                ${isBreaking ? '<span style="font-size: 10px; font-weight: bold; color: #f87171; background: rgba(248,113,113,0.2); padding: 2px 6px; border-radius: 4px;">BREAKING</span>' : ""}
-                <span style="font-size: 11px; color: var(--muted-foreground); margin-left: auto;">${formatTimeAgo(item.timestamp)}</span>
-              </div>
-              <h3 style="font-weight: 600; font-size: 14px; color: var(--foreground); line-height: 1.4; margin-bottom: 8px;">${item.title}</h3>
-              <p style="font-size: 12px; color: var(--muted-foreground); line-height: 1.5; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${item.description || ""}</p>
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="font-size: 11px; color: var(--muted-foreground);">${item.source}</span>
-              </div>
-            </div>
-          </div>
-        `;
+          // Resolved colors — CSS vars don't work inside Mapbox popup DOM
+          const isDark = theme === "dark";
+          const bg       = isDark ? "#1c1c2e" : "#ffffff";
+          const fg       = isDark ? "#f0f0f0" : "#1a1a1a";
+          const muted    = isDark ? "#888"    : "#666";
+          const divider  = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)";
+          const hoverBg  = isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)";
 
-        // Create and show popup
-        popupRef.current = new mapboxgl.Popup({
-          closeButton: true,
-          closeOnClick: true,
-          maxWidth: "340px",
-          offset: 15,
-        })
-          .setLngLat([item.lng, item.lat])
-          .setDOMContent(popupContent)
-          .addTo(map.current!);
-      });
+          const container = document.createElement("div");
+          container.style.cssText = `
+            background: ${bg};
+            border-radius: 10px;
+            overflow: hidden;
+            width: 280px;
+          `;
+
+          // Header
+          const header = document.createElement("div");
+          header.style.cssText = `
+            padding: 9px 12px;
+            font-size: 10px;
+            font-weight: 700;
+            color: ${muted};
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid ${divider};
+          `;
+          header.textContent = `${sorted.length} Artikel an diesem Ort`;
+          container.appendChild(header);
+
+          // Scrollable list (max 15 shown)
+          const MAX_SHOWN = 15;
+          const shown = sorted.slice(0, MAX_SHOWN);
+          const list = document.createElement("div");
+          list.style.cssText = `max-height: 320px; overflow-y: auto;`;
+          container.appendChild(list);
+
+          shown.forEach((item, i) => {
+            const itemColor = CATEGORY_COLORS[item.category] || CATEGORY_COLORS.Politics;
+            const row = document.createElement("div");
+            row.style.cssText = `
+              display: flex;
+              align-items: flex-start;
+              gap: 8px;
+              padding: 8px 12px;
+              cursor: pointer;
+              border-bottom: ${i < sorted.length - 1 ? `1px solid ${divider}` : "none"};
+              transition: background 0.12s;
+            `;
+
+            const pip = document.createElement("div");
+            pip.style.cssText = `
+              width: 6px; height: 6px;
+              border-radius: 50%;
+              background: ${itemColor};
+              margin-top: 4px;
+              flex-shrink: 0;
+            `;
+
+            const body = document.createElement("div");
+            body.style.cssText = `flex: 1; min-width: 0;`;
+
+            const title = document.createElement("p");
+            title.style.cssText = `
+              font-size: 12px;
+              font-weight: 600;
+              color: ${fg};
+              line-height: 1.35;
+              margin: 0 0 2px;
+              display: -webkit-box;
+              -webkit-line-clamp: 2;
+              -webkit-box-orient: vertical;
+              overflow: hidden;
+            `;
+            title.textContent = item.title;
+
+            const meta = document.createElement("span");
+            meta.style.cssText = `font-size: 10px; color: ${muted};`;
+            meta.textContent = `${item.source} · ${timeAgo(item.timestamp)}`;
+
+            body.appendChild(title);
+            body.appendChild(meta);
+            row.appendChild(pip);
+            row.appendChild(body);
+
+            row.addEventListener("mouseenter", () => { row.style.background = hoverBg; });
+            row.addEventListener("mouseleave", () => { row.style.background = "transparent"; });
+            row.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              popupRef.current?.remove();
+              setSelectedNews(item);
+            });
+
+            list.appendChild(row);
+          });
+
+          // "X weitere" footer if truncated
+          if (sorted.length > MAX_SHOWN) {
+            const more = document.createElement("div");
+            more.style.cssText = `
+              padding: 7px 12px;
+              font-size: 10px;
+              color: ${muted};
+              border-top: 1px solid ${divider};
+              text-align: center;
+            `;
+            more.textContent = `+ ${sorted.length - MAX_SHOWN} weitere Artikel`;
+            container.appendChild(more);
+          }
+
+          popupRef.current = new mapboxgl.Popup({
+            closeButton: true,
+            closeOnClick: true,
+            maxWidth: "300px",
+            offset: 15,
+          })
+            .setLngLat([top.lng, top.lat])
+            .setDOMContent(container)
+            .addTo(map.current!);
+        });
+      } else {
+        // Single marker click → open article directly
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          map.current?.flyTo({
+            center: [top.lng, top.lat],
+            zoom: Math.max(map.current.getZoom(), 3),
+            speed: 1.4,
+            curve: 1.2,
+          });
+          setSelectedNews(top);
+        });
+      }
 
       const marker = new mapboxgl.Marker(el)
-        .setLngLat([item.lng, item.lat])
+        .setLngLat([top.lng, top.lat])
         .addTo(map.current!);
 
       markersRef.current.push(marker);
     });
   }, [news, mapLoaded, setSelectedNews]);
 
-  // Loading / Error states
   if (tokenError) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-background">
@@ -236,37 +385,42 @@ export default function MapboxGlobe() {
     <div className="w-full h-full relative">
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* Mapbox custom styles */}
+      {mapLoaded && news.length > 0 && (
+        <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold bg-black/60 backdrop-blur-sm text-white border border-white/10 pointer-events-none">
+          {news.length} Artikel
+        </div>
+      )}
+
       <style jsx global>{`
         .mapboxgl-popup-content {
           padding: 0 !important;
-          background: transparent !important;
-          box-shadow: none !important;
-          border-radius: 12px !important;
+          background: hsl(var(--card)) !important;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+          border-radius: 10px !important;
+          border: 1px solid rgba(255,255,255,0.08) !important;
         }
         .mapboxgl-popup-close-button {
-          font-size: 20px;
+          color: #888;
+          font-size: 18px;
           padding: 4px 8px;
-          color: var(--foreground);
-          right: 4px;
-          top: 4px;
+          line-height: 1;
         }
-        .mapboxgl-popup-tip {
-          display: none;
-        }
+        .mapboxgl-popup-close-button:hover { color: #fff; }
+        .mapboxgl-popup-tip { display: none; }
         .mapboxgl-ctrl-group {
-          background: rgba(15, 15, 25, 0.8) !important;
-          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          background: rgba(15,15,25,0.8) !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
           backdrop-filter: blur(10px);
         }
-        .mapboxgl-ctrl-group button {
-          background: transparent !important;
-        }
+        .mapboxgl-ctrl-group button { background: transparent !important; }
         .mapboxgl-ctrl-group button + button {
-          border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+          border-top: 1px solid rgba(255,255,255,0.1) !important;
         }
-        .mapboxgl-ctrl-icon {
-          filter: invert(1);
+        .mapboxgl-ctrl-icon { filter: invert(1); }
+        @keyframes pulse-ring {
+          0%   { transform: scale(1);   opacity: 0.7; }
+          80%  { transform: scale(2.2); opacity: 0;   }
+          100% { transform: scale(2.2); opacity: 0;   }
         }
       `}</style>
     </div>

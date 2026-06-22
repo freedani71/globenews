@@ -8,20 +8,32 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Globe, Loader2, AlertCircle } from "lucide-react";
+import { Globe, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 
+const EMAIL_RE =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z]{2,})+$/;
+
 export default function LoginPage() {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]           = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const loading = isPending;
+  const [email, setEmail]           = useState("");
+  const [password, setPassword]     = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [touched, setTouched]       = useState({ email: false });
   const router = useRouter();
 
-  const handleSubmit = async (formData: FormData) => {
+  const emailError = touched.email && email && !EMAIL_RE.test(email)
+    ? "Ungültige E-Mail-Adresse."
+    : null;
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     setError(null);
-    
+    setTouched({ email: true });
+    if (emailError || !email || !password) return;
+
+    const formData = new FormData(e.currentTarget);
     startTransition(async () => {
       const result = await login(formData);
       if (result?.error) {
@@ -54,58 +66,74 @@ export default function LoginPage() {
         </CardHeader>
         
         <CardContent>
-          <form action={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
             {error && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 {error}
               </div>
             )}
-            
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="email">E-Mail</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder="du@beispiel.ch"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setTouched({ email: true })}
                 required
-                className="bg-input/50"
+                maxLength={254}
+                className={emailError ? "bg-input/50 border-destructive" : "bg-input/50"}
               />
+              {emailError && (
+                <p className="text-xs text-destructive">{emailError}</p>
+              )}
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="bg-input/50"
-              />
+
+            <div className="space-y-1.5">
+              <Label htmlFor="password">Passwort</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  maxLength={128}
+                  className="bg-input/50 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
-            
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (
+
+            <Button type="submit" className="w-full" disabled={isPending || !email || !password}>
+              {isPending ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Signing in...
+                  Anmelden…
                 </>
               ) : (
-                "Sign in"
+                "Anmelden"
               )}
             </Button>
           </form>
           
           <div className="mt-6 text-center text-sm text-muted-foreground">
-            {"Don't have an account? "}
+            Noch kein Konto?{" "}
             <Link href="/auth/sign-up" className="text-primary hover:underline font-medium">
-              Sign up
+              Registrieren
             </Link>
           </div>
         </CardContent>

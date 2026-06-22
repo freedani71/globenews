@@ -144,6 +144,15 @@ interface AppState {
   /** Schliesst das Paywall-Modal */
   closePaywall: () => void;
 
+  // --- Search ---
+  /** Aktueller Suchbegriff */
+  searchQuery: string;
+  /**
+   * Setzt den Suchbegriff für die Nachrichtensuche.
+   * @param query - Suchbegriff
+   */
+  setSearchQuery: (query: string) => void;
+
   // --- Helpers ---
   /**
    * Prüft ob der aktuelle Benutzerplan eine bestimmte Funktion unterstützt.
@@ -170,10 +179,10 @@ export const useAppStore = create<AppState>()(
       toggleTheme: () =>
         set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
 
-      // Filters
+      // Filters – defaults sind Free-Plan-kompatibel (max 3 Kategorien, max 1 Tag Archiv)
       filters: {
-        categories: ["Politics", "Business", "Technology", "Sports", "Entertainment", "Science", "Environment", "Health"],
-        timeFilter: "month",
+        categories: ["Politics", "Business", "Technology"],
+        timeFilter: "today",
         region: "all",
         country: "",
         importance: ["Breaking", "Top", "General"],
@@ -268,28 +277,63 @@ export const useAppStore = create<AppState>()(
       },
       filteredNews: () => {
         const state = get();
-        const { filters, user, news } = state;
+        const { filters, user, news, searchQuery } = state;
         const now = new Date();
+        const plan = PLAN_FEATURES[user.plan];
 
         if (!news || !Array.isArray(news)) return [];
+
+        const allowedCategories = filters.categories.slice(0, plan.maxCategories);
 
         return news.filter((item) => {
           if (!item) return false;
 
-          // Kategorie-Filter
-          if (!filters.categories.includes(item.category)) return false;
+          // Search
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            const inTitle = item.title?.toLowerCase().includes(q);
+            const inDesc = item.description?.toLowerCase().includes(q);
+            const inSource = item.source?.toLowerCase().includes(q);
+            if (!inTitle && !inDesc && !inSource) return false;
+          }
 
-          // Wichtigkeits-Filter
+          // Category (plan-limited)
+          if (!allowedCategories.includes(item.category)) return false;
+
+          // Importance
           if (!filters.importance.includes(item.importance)) return false;
 
-          // Zeitfilter: Unterstützt sowohl Date-Objekte als auch ISO-Strings
+          // Region/continent filter via bounding box
+          if (filters.region !== "all") {
+            const bounds: Record<string, [number, number, number, number]> = {
+              africa:           [-35,  37, -18,  51],
+              asia:             [-10,  77,  26, 180],
+              europe:           [ 36,  71, -25,  45],
+              "north-america":  [ 15,  72, -168, -52],
+              "south-america":  [-56,  13, -82, -34],
+              oceania:          [-47, -10, 110, 180],
+            };
+            const b = bounds[filters.region];
+            if (b) {
+              const [latMin, latMax, lngMin, lngMax] = b;
+              if (item.lat < latMin || item.lat > latMax || item.lng < lngMin || item.lng > lngMax) {
+                return false;
+              }
+            }
+          }
+
+          // Time (free plan capped at "today")
+          const effectiveTimeFilter =
+            user.plan === "free" && (filters.timeFilter === "week" || filters.timeFilter === "month")
+              ? "today"
+              : filters.timeFilter;
+
           const itemDate = item.timestamp instanceof Date
             ? item.timestamp
             : new Date(item.timestamp);
-          const hoursDiff =
-            (now.getTime() - itemDate.getTime()) / (1000 * 60 * 60);
+          const hoursDiff = (now.getTime() - itemDate.getTime()) / (1000 * 60 * 60);
 
-          switch (filters.timeFilter) {
+          switch (effectiveTimeFilter) {
             case "hour":
               if (hoursDiff > 1) return false;
               break;
@@ -304,15 +348,18 @@ export const useAppStore = create<AppState>()(
               break;
           }
 
-          // Gespeicherte-Artikel-Filter
-          if (filters.savedOnly && !user.savedItems.includes(item.id))
-            return false;
+          // Saved-only
+          if (filters.savedOnly && !user.savedItems.includes(item.id)) return false;
 
           return true;
         });
       },
       selectedNews: null,
       setSelectedNews: (news) => set({ selectedNews: news }),
+
+      // Search
+      searchQuery: "",
+      setSearchQuery: (query) => set({ searchQuery: query }),
 
       // Timeline
       timelinePosition: 100,
