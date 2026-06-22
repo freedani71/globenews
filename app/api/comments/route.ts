@@ -165,24 +165,66 @@ export async function POST(request: NextRequest) {
   // Check ban status
   const { data: profile } = await supabase
     .from("profiles")
-    .select("is_banned, display_name")
+    .select("is_banned, ban_count, ban_until, display_name")
     .eq("id", user.id)
     .single();
 
+  // Permanent ban
   if (profile?.is_banned) {
     return NextResponse.json(
-      { error: "Du wurdest gesperrt und kannst keine Kommentare schreiben.", banned: true },
+      { error: "Du bist permanent gesperrt und kannst keine Kommentare mehr schreiben.", banned: true, permanent: true },
       { status: 403 }
     );
   }
 
-  // Check for insults
-  if (containsInsult(sanitized)) {
-    await supabase.from("profiles").update({ is_banned: true }).eq("id", user.id);
+  // Active temporary ban
+  if (profile?.ban_until && new Date(profile.ban_until) > new Date()) {
     return NextResponse.json(
       {
-        error: "Dein Kommentar enthält beleidigende Inhalte. Du wurdest automatisch gesperrt.",
+        error: "Du bist vorübergehend gesperrt.",
         banned: true,
+        ban_until: profile.ban_until,
+      },
+      { status: 403 }
+    );
+  }
+
+  // Check for insults → progressive ban
+  if (containsInsult(sanitized)) {
+    const newCount = (profile?.ban_count ?? 0) + 1;
+    let updateData: Record<string, unknown>;
+    let banUntil: string | null = null;
+
+    if (newCount === 1) {
+      banUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 Minuten
+      updateData = { ban_count: newCount, ban_until: banUntil };
+    } else if (newCount === 2) {
+      banUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 Stunde
+      updateData = { ban_count: newCount, ban_until: banUntil };
+    } else {
+      // 3. Verstos → Permanentsperre
+      updateData = { ban_count: newCount, is_banned: true, ban_until: null };
+    }
+
+    await supabase.from("profiles").update(updateData).eq("id", user.id);
+
+    if (newCount >= 3) {
+      return NextResponse.json(
+        {
+          error: "Du wurdest permanent gesperrt und kannst keine Kommentare mehr schreiben.",
+          banned: true,
+          permanent: true,
+        },
+        { status: 403 }
+      );
+    }
+
+    const minutes = newCount === 1 ? "10 Minuten" : "1 Stunde";
+    return NextResponse.json(
+      {
+        error: `Dein Kommentar enthält beleidigende Inhalte. Du wurdest für ${minutes} gesperrt.`,
+        banned: true,
+        ban_until: banUntil,
       },
       { status: 403 }
     );

@@ -6,22 +6,25 @@
  *              Lädt und zeigt Kommentare via REST-API, erlaubt eingeloggten Benutzern
  *              das Verfassen neuer Kommentare und Admins das Löschen von Kommentaren.
  *
- * Gesperrt-Zustand (banned):
- * - Beim Laden der Komponente wird der `is_banned`-Wert des Profils aus Supabase gelesen.
- * - Antwortet die POST-Route mit `{ banned: true }`, wird `banned` auch clientseitig
- *   sofort gesetzt — der Nutzer sieht ohne Seitenreload die Sperrmeldung.
+ * Stufenweises Bansystem:
+ * - 1. Verstos: 10-Minuten-Sperre (ban_until gesetzt, ban_count = 1)
+ * - 2. Verstos: 1-Stunden-Sperre  (ban_until gesetzt, ban_count = 2)
+ * - 3. Verstos: Permanentsperre   (is_banned = true)
+ * Beim Laden der Komponente wird der Banstatus aus dem Profil gelesen.
+ * Antwortet die POST-Route mit `{ banned: true }`, wird der Zustand sofort
+ * clientseitig gesetzt — ohne Seitenreload sichtbar.
  *
- * Strg+Enter-Tastenkürzel:
- * - `onKeyDown`-Handler prüft gleichzeitigen Druck von Ctrl und Enter.
- * - Ermöglicht schnelles Absenden des Kommentars ohne Mausinteraktion.
+ * Countdown-Timer:
+ * Läuft jede Sekunde via `setInterval`. Wenn die Zeit abläuft, wird `banUntil`
+ * geleert und die Eingabe wieder freigegeben.
  *
  * @author Projektteam GlobeNews
- * @version 1.0
- * @date 2026-05-20
+ * @version 1.1
+ * @date 2026-06-22
  */
 
-import { useEffect, useState } from "react";
-import { Send, Loader2, MessageCircle, Trash2 } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { Send, Loader2, MessageCircle, Trash2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
@@ -42,8 +45,6 @@ interface CommentSectionProps {
 
 /**
  * Formatiert einen ISO-Zeitstempel in ein lesbares Datum-/Uhrzeit-Format (de-CH).
- * @param ts - ISO-Zeitstempel des Kommentars
- * @returns Formatierte Zeichenkette, z.B. "22.06.2026, 14:35"
  */
 function formatTime(ts: string) {
   const d = new Date(ts);
@@ -57,8 +58,21 @@ function formatTime(ts: string) {
 }
 
 /**
+ * Formatiert verbleibende Sekunden als "mm:ss" oder "Xh mm:ss".
+ */
+function formatCountdown(seconds: number): string {
+  if (seconds <= 0) return "0:00";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) {
+    return `${h}h ${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
  * Kommentarbereich für einen einzelnen Artikel.
- * @param articleId - ID des Artikels (Guardian-ID oder Demo-ID)
  */
 export default function CommentSection({ articleId }: CommentSectionProps) {
   const [comments, setComments] = useState<Comment[]>([]);
@@ -66,31 +80,59 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [banned, setBanned] = useState(false);
+  const [banned, setBanned] = useState(false);           // Permanentsperre
+  const [banUntil, setBanUntil] = useState<Date | null>(null); // Temporäre Sperre
+  const [secondsLeft, setSecondsLeft] = useState(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Starte oder stoppe den Countdown wenn sich banUntil ändert
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (!banUntil) { setSecondsLeft(0); return; }
+
+    const tick = () => {
+      const remaining = Math.ceil((banUntil.getTime() - Date.now()) / 1000);
+      if (remaining <= 0) {
+        if (timerRef.current) clearInterval(timerRef.current);
+        setBanUntil(null);
+        setSecondsLeft(0);
+      } else {
+        setSecondsLeft(remaining);
+      }
+    };
+
+    tick(); // sofort einmal
+    timerRef.current = setInterval(tick, 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [banUntil]);
+
+  // Profil + Banstatus laden
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setIsLoggedIn(!!user);
-      setUserId(user?.id ?? null);
       if (user) {
         setIsAdmin(user.user_metadata?.is_admin === true);
-        // Check if banned
         supabase
           .from("profiles")
-          .select("is_banned")
+          .select("is_banned, ban_until")
           .eq("id", user.id)
           .single()
           .then(({ data }) => {
-            if (data?.is_banned) setBanned(true);
+            if (data?.is_banned) {
+              setBanned(true);
+            } else if (data?.ban_until) {
+              const until = new Date(data.ban_until);
+              if (until > new Date()) setBanUntil(until);
+            }
           });
       }
     });
   }, []);
 
+  // Kommentare laden
   useEffect(() => {
     fetch(`/api/comments?articleId=${encodeURIComponent(articleId)}`)
       .then((r) => r.json())
@@ -112,7 +154,13 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
 
     if (!res.ok) {
       setError(data.error || "Fehler beim Senden");
-      if (data.banned) setBanned(true);
+      if (data.banned) {
+        if (data.permanent) {
+          setBanned(true);
+        } else if (data.ban_until) {
+          setBanUntil(new Date(data.ban_until));
+        }
+      }
     } else {
       setComments((prev) => [...prev, data.comment]);
       setContent("");
@@ -126,6 +174,8 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
       setComments((prev) => prev.filter((c) => c.id !== commentId));
     }
   };
+
+  const isTempBanned = !!banUntil && banUntil > new Date();
 
   return (
     <div className="border-t border-border/50 pt-4 mt-2">
@@ -188,9 +238,24 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
           um zu kommentieren
         </p>
       ) : banned ? (
+        // Permanentsperre
         <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 text-center">
           <p className="text-xs text-destructive font-medium">
-            Du wurdest gesperrt und kannst keine Kommentare schreiben.
+            Du bist permanent gesperrt und kannst keine Kommentare mehr schreiben.
+          </p>
+        </div>
+      ) : isTempBanned ? (
+        // Temporäre Sperre mit Countdown
+        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-center space-y-1">
+          <div className="flex items-center justify-center gap-1.5 text-orange-500">
+            <Clock className="w-3.5 h-3.5" />
+            <span className="text-xs font-semibold">Vorübergehend gesperrt</span>
+          </div>
+          <p className="text-xs text-orange-400/80">
+            Du kannst wieder kommentieren in
+          </p>
+          <p className="text-lg font-mono font-bold text-orange-500 tabular-nums">
+            {formatCountdown(secondsLeft)}
           </p>
         </div>
       ) : (

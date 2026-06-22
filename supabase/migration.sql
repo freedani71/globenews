@@ -1,7 +1,11 @@
 -- Führe dieses Script im Supabase SQL-Editor aus (https://supabase.com/dashboard -> SQL Editor)
 
--- 1. is_banned Spalte zu profiles hinzufügen
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+-- 1. Ban-Spalten zu profiles hinzufügen
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned  BOOLEAN     DEFAULT FALSE;
+-- ban_count: Anzahl bisheriger Verstösse (0 = noch keiner)
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ban_count  INTEGER     DEFAULT 0;
+-- ban_until: Ablaufzeitpunkt einer temporären Sperre (NULL = keine aktive Sperre)
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ban_until  TIMESTAMPTZ DEFAULT NULL;
 
 -- 2. Kommentare-Tabelle erstellen
 CREATE TABLE IF NOT EXISTS comments (
