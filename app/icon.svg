@@ -1,0 +1,10 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="8" fill="#6366f1"/>
+  <!-- Globe circle -->
+  <circle cx="16" cy="16" r="10" stroke="white" stroke-width="1.5" fill="none"/>
+  <!-- Latitude lines -->
+  <ellipse cx="16" cy="16" rx="4.5" ry="10" stroke="white" stroke-width="1.2" fill="none"/>
+  <!-- Horizontal lines -->
+  <line x1="6" y1="13" x2="26" y2="13" stroke="white" stroke-width="1.2"/>
+  <line x1="6" y1="19" x2="26" y2="19" stroke="white" stroke-width="1.2"/>
+</svg>
