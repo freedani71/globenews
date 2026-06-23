@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useTransition, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { signUp } from "@/app/auth/actions";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,13 +45,14 @@ const STRENGTH_TEXT   = ["", "text-red-500", "text-orange-400", "text-yellow-400
 export default function SignUpPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [emailExists, setEmailExists] = useState(false);
-  const [isPending, startTransition]  = useTransition();
+  const [isPending, setIsPending]     = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail]             = useState("");
   const [password, setPassword]       = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched]         = useState({ name: false, email: false, password: false });
   const router = useRouter();
+  const supabase = createClient();
 
   // ── Live validation ──────────────────────────────────────────────────────
 
@@ -87,26 +88,46 @@ export default function SignUpPage() {
     setServerError(null);
     setEmailExists(false);
     setTouched({ name: true, email: true, password: true });
-
     if (!canSubmit) return;
 
-    const formData = new FormData(e.currentTarget);
-    formData.set("isAdmin", "false");
+    setIsPending(true);
+    try {
+      const name = displayName.trim().slice(0, 50);
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+          data: {
+            display_name: name || email.split("@")[0],
+            is_admin: false,
+            plan: "free",
+          },
+        },
+      });
 
-    startTransition(async () => {
-      try {
-        const result = await signUp(formData);
-        if (result?.error === "EMAIL_EXISTS") {
+      if (error) {
+        const msg = error.message || "Registrierung fehlgeschlagen.";
+        if (msg.toLowerCase().includes("already registered") || msg.toLowerCase().includes("already exists")) {
           setEmailExists(true);
-        } else if (result?.error) {
-          setServerError(typeof result.error === "string" ? result.error : "Registrierung fehlgeschlagen.");
-        } else if (result?.success && result.redirectTo) {
-          router.push(result.redirectTo);
+        } else {
+          setServerError(msg);
         }
-      } catch {
-        setServerError("Verbindungsfehler. Bitte versuche es erneut.");
+        return;
       }
-    });
+
+      // Supabase anti-enumeration: bestehende E-Mail → leeres identities-Array
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        setEmailExists(true);
+        return;
+      }
+
+      router.push("/auth/sign-up-success");
+    } catch (e) {
+      setServerError(e instanceof Error ? e.message : "Verbindungsfehler. Bitte versuche es erneut.");
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
