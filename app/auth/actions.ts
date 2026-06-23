@@ -155,7 +155,7 @@ export async function signUp(formData: FormData) {
   const password = rawPassword.slice(0, 128);
   const name     = sanitizeText(rawName, 50);
 
-  // Server-side validation (always validate server-side even if client already did)
+  // Server-side validation
   const emailErr = validateEmail(email);
   if (emailErr) return { error: emailErr, success: false };
 
@@ -165,39 +165,47 @@ export async function signUp(formData: FormData) {
   const nameErr = validateDisplayName(name);
   if (nameErr) return { error: nameErr, success: false };
 
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      emailRedirectTo:
-        process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-        `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"}/`,
-      data: {
-        display_name: name || email.split("@")[0],
-        is_admin: isAdmin,
-        plan: isAdmin ? "business" : "free",
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo:
+          process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
+          `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"}/`,
+        data: {
+          display_name: name || email.split("@")[0],
+          is_admin: isAdmin,
+          plan: isAdmin ? "business" : "free",
+        },
       },
-    },
-  });
+    });
 
-  if (error) {
-    if (
-      error.message.toLowerCase().includes("already registered") ||
-      error.message.toLowerCase().includes("already exists")
-    ) {
+    if (error) {
+      const msg = typeof error.message === "string" && error.message
+        ? error.message
+        : "Registrierung fehlgeschlagen. Bitte versuche es erneut.";
+      if (
+        msg.toLowerCase().includes("already registered") ||
+        msg.toLowerCase().includes("already exists")
+      ) {
+        return { error: "EMAIL_EXISTS", success: false };
+      }
+      return { error: msg, success: false };
+    }
+
+    // Supabase anti-enumeration: existing user → empty identities array, no error
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
       return { error: "EMAIL_EXISTS", success: false };
     }
-    return { error: error.message, success: false };
-  }
 
-  // Supabase anti-enumeration: existing user → empty identities array, no error
-  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-    return { error: "EMAIL_EXISTS", success: false };
+    return { success: true, redirectTo: "/auth/sign-up-success" };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unbekannter Fehler bei der Registrierung.";
+    return { error: msg, success: false };
   }
-
-  return { success: true, redirectTo: "/auth/sign-up-success" };
 }
 
 /**

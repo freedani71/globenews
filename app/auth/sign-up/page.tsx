@@ -94,13 +94,17 @@ export default function SignUpPage() {
     formData.set("isAdmin", "false");
 
     startTransition(async () => {
-      const result = await signUp(formData);
-      if (result?.error === "EMAIL_EXISTS") {
-        setEmailExists(true);
-      } else if (result?.error) {
-        setServerError(result.error);
-      } else if (result?.success && result.redirectTo) {
-        router.push(result.redirectTo);
+      try {
+        const result = await signUp(formData);
+        if (result?.error === "EMAIL_EXISTS") {
+          setEmailExists(true);
+        } else if (result?.error) {
+          setServerError(typeof result.error === "string" ? result.error : "Registrierung fehlgeschlagen.");
+        } else if (result?.success && result.redirectTo) {
+          router.push(result.redirectTo);
+        }
+      } catch {
+        setServerError("Verbindungsfehler. Bitte versuche es erneut.");
       }
     });
   };
