@@ -66,6 +66,18 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
   const [userLikes, setUserLikes]   = useState<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Ban-Hilfsfunktionen: localStorage als schneller Fallback über alle Artikel-Sections
+  const applyTempBan = (until: Date) => {
+    localStorage.setItem("gn_ban_until", until.toISOString());
+    localStorage.removeItem("gn_permanent_ban");
+    setBanUntil(until);
+  };
+  const applyPermaBan = () => {
+    localStorage.setItem("gn_permanent_ban", "1");
+    localStorage.removeItem("gn_ban_until");
+    setBanned(true);
+  };
+
   // Countdown-Timer
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -76,6 +88,7 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
         if (timerRef.current) clearInterval(timerRef.current);
         setBanUntil(null);
         setSecondsLeft(0);
+        localStorage.removeItem("gn_ban_until");
       } else {
         setSecondsLeft(remaining);
       }
@@ -85,8 +98,20 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [banUntil]);
 
-  // Auth + Banstatus laden
+  // Auth + Banstatus laden (localStorage zuerst, dann DB)
   useEffect(() => {
+    // Sofort aus localStorage lesen — kein Netzwerk nötig
+    if (localStorage.getItem("gn_permanent_ban")) {
+      setBanned(true);
+    } else {
+      const stored = localStorage.getItem("gn_ban_until");
+      if (stored) {
+        const until = new Date(stored);
+        if (until > new Date()) setBanUntil(until);
+        else localStorage.removeItem("gn_ban_until");
+      }
+    }
+
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setIsLoggedIn(!!user);
@@ -100,10 +125,10 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
           .single()
           .then(({ data }) => {
             if (data?.is_banned) {
-              setBanned(true);
+              applyPermaBan();
             } else if (data?.ban_until) {
               const until = new Date(data.ban_until);
-              if (until > new Date()) setBanUntil(until);
+              if (until > new Date()) applyTempBan(until);
             }
           });
       }
@@ -164,8 +189,8 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
     if (!res.ok) {
       setError(data.error || "Fehler beim Senden");
       if (data.banned) {
-        if (data.permanent) setBanned(true);
-        else if (data.ban_until) setBanUntil(new Date(data.ban_until));
+        if (data.permanent) applyPermaBan();
+        else if (data.ban_until) applyTempBan(new Date(data.ban_until));
       }
     } else {
       // Realtime fügt den Kommentar hinzu — trotzdem optimistisch einfügen
