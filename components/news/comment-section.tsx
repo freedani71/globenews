@@ -117,7 +117,9 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
       setIsLoggedIn(!!user);
       setUserId(user?.id ?? null);
       if (user) {
-        setIsAdmin(user.user_metadata?.is_admin === true);
+        // is_admin aus profiles lesen, nicht aus dem JWT-Token
+        supabase.from("profiles").select("is_admin").eq("id", user.id).single()
+          .then(({ data }) => setIsAdmin(data?.is_admin === true));
         supabase
           .from("profiles")
           .select("is_banned, ban_until")

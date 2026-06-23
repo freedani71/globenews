@@ -92,7 +92,14 @@ export default function AdminPage() {
 
     if (!user) { router.push("/auth/login"); return; }
 
-    const userIsAdmin = user.user_metadata?.is_admin === true;
+    // Prüfe is_admin direkt aus der profiles-Tabelle (nicht aus dem JWT-Token)
+    const { data: ownProfile } = await supabase
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .single();
+
+    const userIsAdmin = ownProfile?.is_admin === true;
     setIsAdmin(userIsAdmin);
 
     if (!userIsAdmin) { setLoading(false); return; }
