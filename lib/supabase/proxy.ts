@@ -54,8 +54,12 @@ export async function updateSession(request: NextRequest) {
 
   // Redirect non-admin users trying to access admin routes
   if (user && request.nextUrl.pathname.startsWith('/admin')) {
-    const isAdmin = user.user_metadata?.is_admin === true
-    if (!isAdmin) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', user.id)
+      .single()
+    if (!profile?.is_admin) {
       const url = request.nextUrl.clone()
       url.pathname = '/'
       return NextResponse.redirect(url)
