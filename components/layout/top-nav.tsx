@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
-  Search, Globe, List, Sun, Moon, User,
-  Sparkles, Shield, LogOut, X, Loader2,
+  Search, Globe, List, Sun, Moon,
+  Sparkles, Shield, LogOut, X, Loader2, Bookmark, User,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { createClient } from "@/lib/supabase/client";
@@ -20,20 +20,43 @@ import { cn } from "@/lib/utils";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function TopNav() {
-  const { view, setView, theme, toggleTheme, searchQuery, setSearchQuery } = useAppStore();
+  const { view, setView, theme, toggleTheme, searchQuery, setSearchQuery, news } = useAppStore();
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [plan, setPlan] = useState("free");
   const [authLoading, setAuthLoading] = useState(true);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  // Suchvorschläge: max 5 passende Artikel-Titel
+  const suggestions = searchQuery.trim().length > 1
+    ? news
+        .filter((n) => n.title?.toLowerCase().includes(searchQuery.toLowerCase()))
+        .slice(0, 5)
+    : [];
+
+  // Dropdown schliessen bei Klick ausserhalb
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);
       if (user) {
-        setIsAdmin(user.user_metadata?.is_admin === true);
-        setPlan(user.user_metadata?.plan || "free");
+        supabase.from("profiles").select("is_admin, plan").eq("id", user.id).single()
+          .then(({ data }) => {
+            setIsAdmin(data?.is_admin === true);
+            setPlan(data?.plan || "free");
+          });
       }
       setAuthLoading(false);
     });
@@ -41,8 +64,11 @@ export default function TopNav() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        setIsAdmin(session.user.user_metadata?.is_admin === true);
-        setPlan(session.user.user_metadata?.plan || "free");
+        supabase.from("profiles").select("is_admin, plan").eq("id", session.user.id).single()
+          .then(({ data }) => {
+            setIsAdmin(data?.is_admin === true);
+            setPlan(data?.plan || "free");
+          });
       } else {
         setIsAdmin(false);
         setPlan("free");
@@ -69,23 +95,48 @@ export default function TopNav() {
           <span className="text-sm font-bold tracking-tight hidden sm:block">GlobeNews</span>
         </Link>
 
-        {/* Search */}
-        <div className="flex-1 max-w-xs relative">
+        {/* Search + Suchvorschläge */}
+        <div className="flex-1 max-w-xs relative" ref={searchRef}>
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <input
             type="text"
             placeholder="Suchen…"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value.replace(/[<>"'`]/g, "").slice(0, 100))}
+            onChange={(e) => {
+              setSearchQuery(e.target.value.replace(/[<>"'`]/g, "").slice(0, 100));
+              setShowSuggestions(true);
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            onKeyDown={(e) => { if (e.key === "Escape") setShowSuggestions(false); }}
             className="w-full h-8 pl-8 pr-7 rounded-md text-sm bg-secondary/80 border border-border/60 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery("")}
+              onClick={() => { setSearchQuery(""); setShowSuggestions(false); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          )}
+
+          {/* Vorschlagsliste */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute top-full mt-1 left-0 right-0 z-50 rounded-md border border-border bg-card shadow-lg overflow-hidden">
+              {suggestions.map((item) => (
+                <button
+                  key={item.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSearchQuery(item.title);
+                    setShowSuggestions(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-secondary transition-colors flex items-center gap-2"
+                >
+                  <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <span className="truncate">{item.title}</span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
@@ -156,6 +207,19 @@ export default function TopNav() {
                   {plan} Plan
                 </p>
               </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/profile" className="flex items-center gap-2 cursor-pointer">
+                  <User className="w-3.5 h-3.5" />
+                  Mein Profil
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/saved" className="flex items-center gap-2 cursor-pointer">
+                  <Bookmark className="w-3.5 h-3.5" />
+                  Gespeicherte Artikel
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               {isAdmin && (
                 <>
