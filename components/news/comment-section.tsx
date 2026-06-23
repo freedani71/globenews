@@ -3,95 +3,73 @@
 /**
  * @file comment-section.tsx
  * @fileoverview Kommentarbereich für einzelne Nachrichtenartikel.
- *              Lädt und zeigt Kommentare via REST-API, erlaubt eingeloggten Benutzern
- *              das Verfassen neuer Kommentare und Admins das Löschen von Kommentaren.
  *
- * Stufenweises Bansystem:
- * - 1. Verstos: 10-Minuten-Sperre (ban_until gesetzt, ban_count = 1)
- * - 2. Verstos: 1-Stunden-Sperre  (ban_until gesetzt, ban_count = 2)
- * - 3. Verstos: Permanentsperre   (is_banned = true)
- * Beim Laden der Komponente wird der Banstatus aus dem Profil gelesen.
- * Antwortet die POST-Route mit `{ banned: true }`, wird der Zustand sofort
- * clientseitig gesetzt — ohne Seitenreload sichtbar.
- *
- * Countdown-Timer:
- * Läuft jede Sekunde via `setInterval`. Wenn die Zeit abläuft, wird `banUntil`
- * geleert und die Eingabe wieder freigegeben.
+ * Features:
+ * - Echtzeit-Updates via Supabase Realtime (neue/gelöschte Kommentare erscheinen sofort)
+ * - Like-Button pro Kommentar (1 Like pro User, optimistisches UI)
+ * - Stufenweises Bansystem: 10 min → 1 h → permanent, mit Live-Countdown
+ * - Strg+Enter zum schnellen Absenden
  *
  * @author Projektteam GlobeNews
- * @version 1.1
- * @date 2026-06-22
+ * @version 1.2
+ * @date 2026-06-23
  */
 
 import { useEffect, useState, useRef } from "react";
-import { Send, Loader2, MessageCircle, Trash2, Clock } from "lucide-react";
+import { Send, Loader2, MessageCircle, Trash2, Clock, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 
-/** Struktur eines einzelnen Kommentars aus der Datenbank. */
 interface Comment {
   id: string;
   user_name: string;
   content: string;
   created_at: string;
+  like_count: number;
 }
 
-/** Props der CommentSection-Komponente. */
 interface CommentSectionProps {
-  /** ID des Artikels, zu dem Kommentare geladen und gepostet werden. */
   articleId: string;
 }
 
-/**
- * Formatiert einen ISO-Zeitstempel in ein lesbares Datum-/Uhrzeit-Format (de-CH).
- */
 function formatTime(ts: string) {
   const d = new Date(ts);
   return d.toLocaleDateString("de-CH", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
   });
 }
 
-/**
- * Formatiert verbleibende Sekunden als "mm:ss" oder "Xh mm:ss".
- */
 function formatCountdown(seconds: number): string {
   if (seconds <= 0) return "0:00";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  if (h > 0) {
-    return `${h}h ${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  }
+  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/**
- * Kommentarbereich für einen einzelnen Artikel.
- */
 export default function CommentSection({ articleId }: CommentSectionProps) {
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [comments, setComments]     = useState<Comment[]>([]);
+  const [content, setContent]       = useState("");
+  const [loading, setLoading]       = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [banned, setBanned] = useState(false);           // Permanentsperre
-  const [banUntil, setBanUntil] = useState<Date | null>(null); // Temporäre Sperre
+  const [error, setError]           = useState<string | null>(null);
+  const [banned, setBanned]         = useState(false);
+  const [banUntil, setBanUntil]     = useState<Date | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin]       = useState(false);
+  const [userId, setUserId]         = useState<string | null>(null);
+  const [userLikes, setUserLikes]   = useState<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Starte oder stoppe den Countdown wenn sich banUntil ändert
+  // Countdown-Timer
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (!banUntil) { setSecondsLeft(0); return; }
-
     const tick = () => {
       const remaining = Math.ceil((banUntil.getTime() - Date.now()) / 1000);
       if (remaining <= 0) {
@@ -102,17 +80,17 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
         setSecondsLeft(remaining);
       }
     };
-
-    tick(); // sofort einmal
+    tick();
     timerRef.current = setInterval(tick, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [banUntil]);
 
-  // Profil + Banstatus laden
+  // Auth + Banstatus laden
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setIsLoggedIn(!!user);
+      setUserId(user?.id ?? null);
       if (user) {
         setIsAdmin(user.user_metadata?.is_admin === true);
         supabase
@@ -132,12 +110,43 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
     });
   }, []);
 
-  // Kommentare laden
+  // Kommentare + Likes laden
   useEffect(() => {
     fetch(`/api/comments?articleId=${encodeURIComponent(articleId)}`)
       .then((r) => r.json())
-      .then((d) => setComments(d.comments || []))
+      .then((d) => {
+        setComments(d.comments || []);
+        setUserLikes(new Set(d.userLikes || []));
+      })
       .finally(() => setLoading(false));
+  }, [articleId]);
+
+  // Supabase Realtime: neue/gelöschte Kommentare live empfangen
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`comments:${articleId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "comments", filter: `article_id=eq.${articleId}` },
+        (payload) => {
+          const newComment = payload.new as Comment;
+          setComments((prev) => {
+            if (prev.some((c) => c.id === newComment.id)) return prev;
+            return [...prev, { ...newComment, like_count: newComment.like_count ?? 0 }];
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "comments" },
+        (payload) => {
+          setComments((prev) => prev.filter((c) => c.id !== payload.old.id));
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [articleId]);
 
   const handleSubmit = async () => {
@@ -155,14 +164,16 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
     if (!res.ok) {
       setError(data.error || "Fehler beim Senden");
       if (data.banned) {
-        if (data.permanent) {
-          setBanned(true);
-        } else if (data.ban_until) {
-          setBanUntil(new Date(data.ban_until));
-        }
+        if (data.permanent) setBanned(true);
+        else if (data.ban_until) setBanUntil(new Date(data.ban_until));
       }
     } else {
-      setComments((prev) => [...prev, data.comment]);
+      // Realtime fügt den Kommentar hinzu — trotzdem optimistisch einfügen
+      // falls Realtime nicht sofort feuert
+      setComments((prev) => {
+        if (prev.some((c) => c.id === data.comment.id)) return prev;
+        return [...prev, { ...data.comment, like_count: 0 }];
+      });
       setContent("");
     }
     setSubmitting(false);
@@ -170,8 +181,47 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
 
   const handleDelete = async (commentId: string) => {
     const res = await fetch(`/api/comments?id=${commentId}`, { method: "DELETE" });
-    if (res.ok) {
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    if (res.ok) setComments((prev) => prev.filter((c) => c.id !== commentId));
+  };
+
+  const handleLike = async (commentId: string) => {
+    if (!isLoggedIn) return;
+    const alreadyLiked = userLikes.has(commentId);
+
+    // Optimistisches UI
+    setUserLikes((prev) => {
+      const next = new Set(prev);
+      alreadyLiked ? next.delete(commentId) : next.add(commentId);
+      return next;
+    });
+    setComments((prev) =>
+      prev.map((c) =>
+        c.id === commentId
+          ? { ...c, like_count: alreadyLiked ? Math.max(0, c.like_count - 1) : c.like_count + 1 }
+          : c
+      )
+    );
+
+    const res = await fetch("/api/comments/likes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commentId }),
+    });
+
+    // Bei Fehler zurückrollen
+    if (!res.ok) {
+      setUserLikes((prev) => {
+        const next = new Set(prev);
+        alreadyLiked ? next.add(commentId) : next.delete(commentId);
+        return next;
+      });
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId
+            ? { ...c, like_count: alreadyLiked ? c.like_count + 1 : Math.max(0, c.like_count - 1) }
+            : c
+        )
+      );
     }
   };
 
@@ -181,9 +231,7 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
     <div className="border-t border-border/50 pt-4 mt-2">
       <div className="flex items-center gap-2 mb-3">
         <MessageCircle className="w-4 h-4 text-muted-foreground" />
-        <span className="text-sm font-medium">
-          Kommentare ({comments.length})
-        </span>
+        <span className="text-sm font-medium">Kommentare ({comments.length})</span>
       </div>
 
       {loading ? (
@@ -197,63 +245,82 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
               Noch keine Kommentare. Sei der Erste!
             </p>
           ) : (
-            comments.map((comment) => (
-              <div key={comment.id} className="bg-secondary/30 rounded-lg p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-primary truncate">
-                        {comment.user_name}
-                      </span>
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {formatTime(comment.created_at)}
-                      </span>
+            comments.map((comment) => {
+              const liked = userLikes.has(comment.id);
+              return (
+                <div key={comment.id} className="bg-secondary/30 rounded-lg p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-primary truncate">
+                          {comment.user_name}
+                        </span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {formatTime(comment.created_at)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground/90 break-words">
+                        {comment.content}
+                      </p>
                     </div>
-                    <p className="text-sm text-foreground/90 break-words">
-                      {comment.content}
-                    </p>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* Like-Button */}
+                      <button
+                        onClick={() => handleLike(comment.id)}
+                        disabled={!isLoggedIn}
+                        className={cn(
+                          "flex items-center gap-0.5 px-1.5 py-1 rounded transition-colors text-[10px]",
+                          liked
+                            ? "text-rose-500"
+                            : "text-muted-foreground/50 hover:text-muted-foreground",
+                          !isLoggedIn && "cursor-default"
+                        )}
+                      >
+                        <Heart className={cn("w-3 h-3", liked && "fill-current")} />
+                        {comment.like_count > 0 && (
+                          <span className="tabular-nums">{comment.like_count}</span>
+                        )}
+                      </button>
+
+                      {/* Löschen (Admin) */}
+                      {(isAdmin || comment.user_name === userId) && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(comment.id)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                  {isAdmin && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(comment.id)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
 
       {!isLoggedIn ? (
         <p className="text-xs text-muted-foreground text-center py-2 bg-secondary/20 rounded-lg">
-          <a href="/auth/login" className="text-primary hover:underline">
-            Einloggen
-          </a>{" "}
+          <a href="/auth/login" className="text-primary hover:underline">Einloggen</a>{" "}
           um zu kommentieren
         </p>
       ) : banned ? (
-        // Permanentsperre
         <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 text-center">
           <p className="text-xs text-destructive font-medium">
             Du bist permanent gesperrt und kannst keine Kommentare mehr schreiben.
           </p>
         </div>
       ) : isTempBanned ? (
-        // Temporäre Sperre mit Countdown
         <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-center space-y-1">
           <div className="flex items-center justify-center gap-1.5 text-orange-500">
             <Clock className="w-3.5 h-3.5" />
             <span className="text-xs font-semibold">Vorübergehend gesperrt</span>
           </div>
-          <p className="text-xs text-orange-400/80">
-            Du kannst wieder kommentieren in
-          </p>
+          <p className="text-xs text-orange-400/80">Du kannst wieder kommentieren in</p>
           <p className="text-lg font-mono font-bold text-orange-500 tabular-nums">
             {formatCountdown(secondsLeft)}
           </p>
@@ -261,24 +328,18 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
       ) : (
         <div className="space-y-2">
           <Textarea
-            placeholder="Schreibe einen Kommentar..."
+            placeholder="Schreibe einen Kommentar... (Strg+Enter zum Senden)"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="text-sm resize-none h-20 bg-secondary/30 border-border/50"
             maxLength={500}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && e.ctrlKey) handleSubmit();
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter" && e.ctrlKey) handleSubmit(); }}
           />
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">
-              {content.length}/500
-            </span>
+            <span className="text-xs text-muted-foreground">{content.length}/500</span>
             <div className="flex items-center gap-2">
               {error && (
-                <span className="text-xs text-destructive max-w-[200px] text-right">
-                  {error}
-                </span>
+                <span className="text-xs text-destructive max-w-[200px] text-right">{error}</span>
               )}
               <Button
                 size="sm"
@@ -286,11 +347,7 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
                 disabled={!content.trim() || submitting}
                 className="gap-1.5"
               >
-                {submitting ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Send className="w-3 h-3" />
-                )}
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                 Senden
               </Button>
             </div>

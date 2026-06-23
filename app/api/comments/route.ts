@@ -93,6 +93,8 @@ export async function GET(request: NextRequest) {
   if (idErr) return NextResponse.json({ error: idErr }, { status: 400 });
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
   const { data, error } = await supabase
     .from("comments")
     .select("id, user_name, content, created_at")
@@ -100,7 +102,27 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ comments: data || [] });
+
+  const comments = data || [];
+  if (comments.length === 0) return NextResponse.json({ comments: [], userLikes: [] });
+
+  // Fetch like counts and current user's likes in one query
+  const commentIds = comments.map((c) => c.id);
+  const { data: likes } = await supabase
+    .from("comment_likes")
+    .select("comment_id, user_id")
+    .in("comment_id", commentIds);
+
+  const likeCount: Record<string, number> = {};
+  const userLikes: string[] = [];
+
+  for (const like of likes ?? []) {
+    likeCount[like.comment_id] = (likeCount[like.comment_id] ?? 0) + 1;
+    if (user && like.user_id === user.id) userLikes.push(like.comment_id);
+  }
+
+  const enriched = comments.map((c) => ({ ...c, like_count: likeCount[c.id] ?? 0 }));
+  return NextResponse.json({ comments: enriched, userLikes });
 }
 
 // ── POST /api/comments ────────────────────────────────────────────────────────

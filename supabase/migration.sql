@@ -31,3 +31,17 @@ CREATE POLICY "Eigene Kommentare schreiben" ON comments
 -- 6. Nutzer können eigene Kommentare löschen (Admins via Service Role)
 CREATE POLICY "Eigene Kommentare löschen" ON comments
   FOR DELETE USING (auth.uid() = user_id);
+
+-- 7. Realtime für Kommentare aktivieren (Echtzeit-Updates)
+ALTER PUBLICATION supabase_realtime ADD TABLE comments;
+
+-- 8. Per-User-Likes Tabelle
+CREATE TABLE IF NOT EXISTS comment_likes (
+  comment_id UUID NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  PRIMARY KEY (comment_id, user_id)
+);
+ALTER TABLE comment_likes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Likes lesen"          ON comment_likes FOR SELECT USING (true);
+CREATE POLICY "Eigene Likes setzen"  ON comment_likes FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Eigene Likes loeschen" ON comment_likes FOR DELETE USING (auth.uid() = user_id);
