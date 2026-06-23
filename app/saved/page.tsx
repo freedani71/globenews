@@ -7,6 +7,7 @@
  *              zeigt nur die gespeicherten Artikel als Kartenliste an.
  */
 
+import { useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft, Bookmark, Search } from "lucide-react";
@@ -14,6 +15,8 @@ import { useAppStore } from "@/lib/store";
 import { CATEGORY_COLORS } from "@/lib/types";
 import type { NewsItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import NewsPopup from "@/components/news/news-popup";
+import PaywallModal from "@/components/paywall/paywall-modal";
 
 /**
  * Gibt die vergangene Zeit seit einem Zeitstempel als kompakte Zeichenkette zurück.
@@ -37,7 +40,9 @@ function timeAgo(ts: Date | string): string {
  * einen Hinweis zur Anmeldung.
  */
 export default function SavedPage() {
-  const { user, news, setSelectedNews, toggleSavedItem } = useAppStore();
+  const { user, news, setSelectedNews, toggleSavedItem, fetchNews } = useAppStore();
+
+  useEffect(() => { fetchNews(); }, [fetchNews]);
 
   // Not logged in — prompt to log in
   if (!user.isLoggedIn) {
@@ -72,7 +77,7 @@ export default function SavedPage() {
             </p>
           </div>
           <Link
-            href="/auth"
+            href="/auth/login"
             className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
           >
             Anmelden
@@ -235,6 +240,8 @@ export default function SavedPage() {
           </div>
         )}
       </main>
+      <NewsPopup />
+      <PaywallModal />
     </div>
   );
 }
