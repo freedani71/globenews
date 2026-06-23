@@ -1,5 +1,17 @@
 -- Führe dieses Script im Supabase SQL-Editor aus (https://supabase.com/dashboard -> SQL Editor)
 
+-- 0. RLS für profiles-Tabelle (Nutzer lesen/updaten nur eigenes Profil; Admins alles)
+CREATE OR REPLACE FUNCTION public.is_admin_user()
+RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE((SELECT is_admin FROM profiles WHERE id = auth.uid() LIMIT 1), false);
+$$;
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Eigenes Profil lesen"    ON profiles FOR SELECT USING (auth.uid() = id OR public.is_admin_user());
+CREATE POLICY "Eigenes Profil updaten"  ON profiles FOR UPDATE USING (auth.uid() = id OR public.is_admin_user());
+CREATE POLICY "Eigenes Profil einfügen" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
 -- 1. Ban-Spalten zu profiles hinzufügen
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned  BOOLEAN     DEFAULT FALSE;
 -- ban_count: Anzahl bisheriger Verstösse (0 = noch keiner)
