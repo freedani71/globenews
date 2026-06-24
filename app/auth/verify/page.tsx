@@ -1,14 +1,6 @@
 "use client";
 
-/**
- * @file page.tsx
- * @fileoverview OTP-Verifizierungsseite nach der Registrierung.
- *              Benutzer gibt den 6-stelligen Code aus der Bestätigungs-E-Mail ein.
- *              Jedes Feld nimmt eine Ziffer, springt automatisch weiter und
- *              unterstützt Einfügen (Paste) des gesamten Codes.
- */
-
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -18,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 const CODE_LENGTH = 6;
 
-export default function VerifyPage() {
+function VerifyForm() {
   const router       = useRouter();
   const params       = useSearchParams();
   const email        = params.get("email") ?? "";
@@ -33,12 +25,10 @@ export default function VerifyPage() {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fokus auf erstes Feld beim Laden
   useEffect(() => {
     inputRefs.current[0]?.focus();
   }, []);
 
-  // Cooldown-Timer für Erneut senden
   useEffect(() => {
     if (resendCooldown <= 0) return;
     cooldownRef.current = setInterval(() => {
@@ -59,7 +49,6 @@ export default function VerifyPage() {
     if (clean && index < CODE_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
-    // Auto-submit wenn alle Felder voll
     if (clean && next.every((d) => d !== "")) {
       verifyCode(next.join(""));
     }
@@ -136,7 +125,6 @@ export default function VerifyPage() {
       </div>
 
       <div className="w-full max-w-sm relative z-10">
-        {/* Logo */}
         <div className="flex flex-col items-center gap-3 mb-8">
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
             <Globe className="w-7 h-7 text-primary" />
@@ -161,7 +149,6 @@ export default function VerifyPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* 6-stellige Eingabe */}
             <div className="flex justify-center gap-2" onPaste={handlePaste}>
               {digits.map((digit, i) => (
                 <input
@@ -185,7 +172,6 @@ export default function VerifyPage() {
               ))}
             </div>
 
-            {/* Fehler */}
             {error && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -193,7 +179,6 @@ export default function VerifyPage() {
               </div>
             )}
 
-            {/* Submit */}
             <Button
               type="submit"
               className="w-full"
@@ -205,7 +190,6 @@ export default function VerifyPage() {
               }
             </Button>
 
-            {/* Erneut senden */}
             <div className="text-center">
               <button
                 type="button"
@@ -231,5 +215,13 @@ export default function VerifyPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function VerifyPage() {
+  return (
+    <Suspense>
+      <VerifyForm />
+    </Suspense>
   );
 }
