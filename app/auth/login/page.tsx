@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/app/auth/actions";
@@ -14,7 +14,7 @@ import Link from "next/link";
 const EMAIL_RE =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z]{2,})+$/;
 
-export default function LoginPage() {
+function LoginForm() {
   const [error, setError]           = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [email, setEmail]           = useState("");
@@ -53,7 +53,7 @@ export default function LoginPage() {
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
       </div>
-      
+
       <Card className="w-full max-w-md glass border-border/50 relative z-10">
         <CardHeader className="text-center space-y-4">
           <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
@@ -66,7 +66,7 @@ export default function LoginPage() {
             </CardDescription>
           </div>
         </CardHeader>
-        
+
         <CardContent>
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
             {registered && (
@@ -138,7 +138,7 @@ export default function LoginPage() {
               )}
             </Button>
           </form>
-          
+
           <div className="mt-6 text-center text-sm text-muted-foreground">
             Noch kein Konto?{" "}
             <Link href="/auth/sign-up" className="text-primary hover:underline font-medium">
@@ -148,5 +148,13 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }
