@@ -2,13 +2,13 @@
 
 import React from "react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/app/auth/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Globe, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Globe, Loader2, AlertCircle, Eye, EyeOff, CheckCircle } from "lucide-react";
 import Link from "next/link";
 
 const EMAIL_RE =
@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched]       = useState({ email: false });
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const registered = searchParams.get("registered") === "true";
 
   const emailError = touched.email && email && !EMAIL_RE.test(email)
     ? "Ungültige E-Mail-Adresse."
@@ -67,6 +69,13 @@ export default function LoginPage() {
         
         <CardContent>
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            {registered && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                Registrierung erfolgreich! Du kannst dich jetzt anmelden.
+              </div>
+            )}
+
             {error && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />

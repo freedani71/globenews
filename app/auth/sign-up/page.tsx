@@ -122,7 +122,7 @@ export default function SignUpPage() {
         return;
       }
 
-      router.push(`/auth/verify?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+      router.push("/auth/login?registered=true");
     } catch (e) {
       setServerError(e instanceof Error ? e.message : "Verbindungsfehler. Bitte versuche es erneut.");
     } finally {

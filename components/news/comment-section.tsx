@@ -128,9 +128,14 @@ export default function CommentSection({ articleId }: CommentSectionProps) {
           .then(({ data }) => {
             if (data?.is_banned) {
               applyPermaBan();
-            } else if (data?.ban_until) {
-              const until = new Date(data.ban_until);
-              if (until > new Date()) applyTempBan(until);
+            } else if (data?.ban_until && new Date(data.ban_until) > new Date()) {
+              applyTempBan(new Date(data.ban_until));
+            } else {
+              // Unban: localStorage clearen falls Admin entsperrt hat
+              localStorage.removeItem("gn_permanent_ban");
+              localStorage.removeItem("gn_ban_until");
+              setBanned(false);
+              setBanUntil(null);
             }
           });
       }
